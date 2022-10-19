@@ -3,6 +3,7 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+use ieee.std_logic_unsigned.all;
 
 library work;
 use work.QpixPkg.all;
@@ -11,23 +12,19 @@ use work.QpixPkg.all;
 ----------------------------------------------------------------------------------
 entity QpixDataProc is
    generic (
-      X_POS_G         : natural := 0;
-      Y_POS_G         : natural := 0;
-      N_ANALOG_CHAN_G : natural := 16
+      X_POS_G : natural := 0;
+      Y_POS_G : natural := 0
    );
    port (
-      clk             : in  std_logic;
-      rst             : in  std_logic;
-                      
-      ena             : in  std_logic;
-                      
-      testEna         : in  std_logic; 
-      clkCnt          : in  std_logic_vector(31 downto 0);
-                      
-      chanEna         : in  std_logic_vector(N_ANALOG_CHAN_G-1 downto 0);
-      qpixRstPulses   : in  std_logic_vector(N_ANALOG_CHAN_G-1 downto 0);
+      clk      : in  std_logic;
+      rst      : in  std_logic;
 
-      outData         : out QpixDataFormatType
+      ena      : in  std_logic;
+
+      testEna  : in  std_logic; 
+
+      inPorts  : in  QpixInPortsType;
+      outData  : out QpixDataFormatType
       
    );
 end entity QpixDataProc;
@@ -36,13 +33,13 @@ end entity QpixDataProc;
 
 architecture behav of QpixDataProc is
 
-   signal qpixRstPulsesE : std_logic_vector(N_ANALOG_CHAN_G-1 downto 0) := (others => '0');
-   signal qpixRstPulsesM : std_logic_vector(N_ANALOG_CHAN_G-1 downto 0) := (others => '0');
-
    signal testData  : QPixDataFormatType := QpixDataZero_C;
-   signal inData    : QPixDataFormatType := QpixDataZero_C;
+   signal inData_r  : QPixDataFormatType := QpixDataZero_C;
+   signal inData_2r : QPixDataFormatType := QpixDataZero_C;
 
-   signal TimeStamp : std_logic_vector(G_TIMESTAMP_BITS-1 downto 0) := (others => '0');
+   attribute shreg_extract : string;
+   attribute shreg_extract of inData_r : signal is "no";
+   attribute shreg_extract of inData_2r : signal is "no";
 
 begin
 
@@ -61,22 +58,6 @@ begin
       --outData => testData
    --);  --- NOT USED FOR NOW
    ----------------------------------------------------------------------------------
-   TimeStamp <= clkCnt(G_TIMESTAMP_BITS-1 downto 0);
-
-   ANALOG_IN_GEN : for i in 0 to N_ANALOG_CHAN_G-1 generate
-      PulseEdge_U : entity work.EdgeDetector
-         generic map(
-            N_SYNC_G => 2
-         )
-         port map(
-            clk    => clk,
-            rst    => rst,
-            input  => qpixRstPulses(i),
-            output => qpixRstPulsesE(i)
-         );
-   end generate ANALOG_IN_GEN;
-
-   qpixRstPulsesM <= qpixRstPulsesE and chanEna;
 
    ----------------------------------------------------------------------------------
    -- Format the data
@@ -84,29 +65,28 @@ begin
    process (clk)
    begin
       if rising_edge (clk) then
-         inData.DataValid <= '0';
-         if qpixRstPulsesM /= (qpixRstPulsesM'range => '0') then
-            inData.DataValid <= '1';
-            inData.XPos      <= std_logic_vector(to_unsigned(X_POS_G, G_POS_BITS));
-            inData.YPos      <= std_logic_vector(to_unsigned(Y_POS_G, G_POS_BITS));
-            inData.TimeStamp <= TimeStamp;
-            inData.ChanMask  <= qpixRstPulsesE;
-         end if;
+         inData_r.DataValid <= inPorts.Valid;
+         inData_r.XPos      <= std_logic_vector(to_unsigned(X_POS_G, G_POS_BITS));
+         inData_r.YPos      <= std_logic_vector(to_unsigned(Y_POS_G, G_POS_BITS));
+         inData_r.TimeStamp <= inPorts.TimeStamp;
+         inData_r.ChanMask  <= inPorts.ChanMask;
+         inData_2r <= inData_r;
       end if;
    end process;
    ----------------------------------------------------------------------------------
 
    ----------------------------------------------------------------------------------
-   -- Mux between input and test pattern data / TODO
+   -- Mux between input and test pattern data
    ----------------------------------------------------------------------------------
    process (clk)
    begin
       if rising_edge (clk) then
          if ena = '1' then
-            outData <= inData;
+            outData <= inData_2r;
          else
             outData <= QpixDataZero_C;
          end if;
+         
       end if;
    end process;
    ----------------------------------------------------------------------------------

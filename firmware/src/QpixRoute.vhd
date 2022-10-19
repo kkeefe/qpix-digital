@@ -21,6 +21,7 @@ entity QpixRoute is
       rst             : in std_logic;
       
       -- Register information from QpixRegFile                
+      clkCnt          : in  std_logic_vector(31 downto 0);
       qpixReq         : in  QpixRequestType;
       qpixConf        : in  QpixConfigType;
       
@@ -50,9 +51,7 @@ architecture behav of QpixRoute is
     type RegType is record
       state      :  RouteStatesType;
       stateCnt   :  std_logic_vector(G_REG_DATA_BITS-1 downto 0);
-      clkCnt     :  std_logic_vector(31 downto 0);
       timeout    :  std_logic_vector(qpixConf.Timeout'range);
-
       txData     :  QpixDataFormatType;
       respDir    :  std_logic_vector(3 downto 0);
       manRoute   :  std_logic;
@@ -68,7 +67,6 @@ architecture behav of QpixRoute is
    constant REG_INIT_C : RegType := (
       state      => IDLE_S,
       stateCnt   => (others => '0'),
-      clkCnt     => (others => '0'),
       timeout    => (others => '0'),
       txData     => QpixDataZero_C,
       respDir    => (others => '0'),
@@ -248,13 +246,13 @@ begin
    ---------------------------------------------------
    -- Combinational logic
    ---------------------------------------------------
-   process(curReg, nxtReg, inData, rxData, qpixReq, extFifoEmpty, extFifoDout,
-           txReady, locFifoEmpty, qpixConf, locFifoDout) begin
+   process (curReg, inData, rxData, qpixReq, qpixConf, extFifoEmpty, 
+            locFifoDout, txReady, extFifoDout, locFifoEmpty, clkCnt)
+   begin
       nxtReg <= curReg;
       nxtReg.txData.DataValid <= '0';
-      nxtReg.clkCnt <= curReg.clkCnt + 1;
 
-      -- keep track of FIFO counts for debuggin -----
+      -- keep track of FIFO counts for debugging----
       if inData.DataValid = '1' then
          nxtReg.debug.locFifoCnt <= curReg.debug.locFifoCnt + 1;
       end if;
@@ -268,6 +266,9 @@ begin
          nxtReg.debug.extFifoCnt <= curReg.debug.extFifoCnt - 1;
       end if;
       -----------------------------------------------
+
+      nxtReg.manRoute <= qpixConf.ManRoute;
+      nxtReg.respDir  <= qpixConf.DirMask;
 
       case (curReg.state) is 
 
@@ -285,14 +286,8 @@ begin
                nxtReg.state  <= REP_LOCAL_S;
             end if;
 
-            if curReg.manRoute = '1' then
-               nxtReg.respDir  <= qpixConf.DirMask;
-            else
-               nxtReg.respDir <= fQpixGetDirectionMask(X_POS_G, Y_POS_G);
-            end if;
-
-            -- NOTE / TODO -- possible place where fifo is empty but higher
-            -- level word is the register response we want
+            nxtReg.timeout  <= qpixConf.Timeout;
+            
             if extFifoEmpty = '0' and fQpixGetWordType(extFifoDout) = REGRSP_W then
                nxtReg.state <= ROUTE_REGRSP_S;
             end if;
@@ -304,8 +299,8 @@ begin
                if txReady = '1' then
                   if curReg.extFifoRen = '0' and curReg.stateCnt(1) = '1' then
                      nxtReg.txData.DataValid <= '1';
-                     nxtReg.txData.WordType <= G_WORD_TYPE_REGRSP;
-                     nxtReg.txData.Data <= extFifoDout;
+                     nxtReg.txData.WordType  <= G_WORD_TYPE_REGRSP;
+                     nxtReg.txData.Data      <= extFifoDout;
                      nxtReg.txData.DirMask   <= curReg.respDir;
                      nxtReg.extFifoRen <= '1';
                   end if;
@@ -322,8 +317,8 @@ begin
                   if curReg.locFifoRen = '0' and curReg.stateCnt(1) = '1' then
                      nxtReg.locFifoRen <= '1';
                      nxtReg.txData.DataValid <= '1';
-                     nxtReg.txData.XPos      <= std_logic_vector(to_unsigned(X_POS_G, G_POS_BITS));
-                     nxtReg.txData.YPos      <= std_logic_vector(to_unsigned(Y_POS_G, G_POS_BITS));
+                     nxtReg.txData.XPos      <= qpixConf.XPos;
+                     nxtReg.txData.YPos      <= qpixConf.YPos;
                      nxtReg.txData.Timestamp <= locFifoDout(G_TIMESTAMP_BITS - 1 downto 0);
                      nxtReg.txData.ChanMask  <= locFifoDout(G_N_ANALOG_CHAN + G_TIMESTAMP_BITS - 1 downto G_TIMESTAMP_BITS);
                      nxtReg.txData.DirMask   <= curReg.respDir;
@@ -344,9 +339,10 @@ begin
             if txReady = '1' then
                if curReg.stateCnt(1) = '1' then
                   nxtReg.txData.DataValid <= '1';
-                  nxtReg.txData.XPos      <= std_logic_vector(to_unsigned(X_POS_G, G_POS_BITS));
-                  nxtReg.txData.YPos      <= std_logic_vector(to_unsigned(Y_POS_G, G_POS_BITS));
-                  nxtReg.txData.Timestamp <= curReg.clkCnt(15 downto 0) & curReg.clkCnt(15 downto 0); -- FIXME
+                  nxtReg.txData.ChanMask  <= (others => '0');
+                  nxtReg.txData.XPos      <= qpixConf.XPos;
+                  nxtReg.txData.YPos      <= qpixConf.YPos;
+                  nxtReg.txData.Timestamp <= clkCnt(15 downto 0) & clkCnt(15 downto 0); -- FIXME
                   nxtReg.txData.DirMask   <= curReg.respDir;
                   nxtReg.txData.WordType  <= G_WORD_TYPE_EVTEND;
                   nxtReg.state            <= REP_REMOTE_S;
@@ -361,14 +357,13 @@ begin
             nxtReg.extFifoRen <= '0';
             if extFifoEmpty = '0' and txReady = '1' then 
                if curReg.extFifoRen = '0' and curReg.stateCnt(1) = '1' then
-                  nxtReg.extFifoRen       <= '1';
-                  --nxtReg.txData.Data <= extFifoDout;
+                  nxtReg.extFifoRen <= '1';
                   nxtReg.txData           <= fQpixByteToRecord(extFifoDout);
                   nxtReg.txData.DataValid <= '1';
                   nxtReg.txData.DirMask   <= curReg.respDir;
                   -- replace some data FIXME : temporary
                   if extFifoDout(59 downto 56) = G_WORD_TYPE_EVTEND then
-                     nxtReg.txData.Timestamp <= curReg.clkCnt(15 downto 0) & extFifoDout(15 downto 0);
+                     nxtReg.txData.Timestamp <= clkCnt(15 downto 0) & extFifoDout(15 downto 0);
                   end if;
                else
                   nxtReg.extFifoRen <= '0';
@@ -418,19 +413,6 @@ begin
    txData     <= curReg.txData;
    debug      <= curReg.debug;
 
-
-   --process(stateInt, extFifoEmpty)
-   --begin
-      --if stateInt /= 2 then
-         --routeStateInt <= stateInt;
-      --else
-         --if extFifoEmpty = '1' then 
-            --routeStateInt <= 2;
-         --else
-            --routeStateInt <= 3;
-         --end if;
-      --end if;
-   --end process;
 
 
 end behav;

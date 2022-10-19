@@ -34,6 +34,7 @@ entity QpixEndeavorRx is
       rxByte      : out std_logic_vector(NUM_BITS_G-1 downto 0);
       rxByteValid : out std_logic;
       rxState     : out std_logic_vector(2 downto 0);
+      rxByteAck   : in  std_logic;
       rx          : in  std_logic
    );
 end QpixEndeavorRx;
@@ -104,16 +105,15 @@ begin
    rx_r <= rx_q(3);
 
    -- Asynchronous state logic
-   process(curReg, rx_r) 
+   process(curReg, rx_r, rxByteAck) 
    begin
       -- Set defaults
       nxtReg <= curReg;
 
-      -- Default strobe signals are '0'
-      nxtReg.byteValid <= '0';
+      if rxByteAck = '1' then
+         nxtReg.byteValid <= '0';
+      end if;
       nxtReg.bitError  <= '0';
-      --nxtReg.gapError  <= '0';
-      --nxtReg.lenError  <= '0';
 
       if rx_r = '1' then
          nxtReg.highCnt <= curReg.highCnt + 1;
@@ -129,6 +129,10 @@ begin
                nxtReg.state   <= DATA_S;
                nxtReg.lowCnt  <= (others => '0');
             end if;
+            nxtReg.lenError  <= '0';
+            nxtReg.gapError  <= '0';
+            nxtReg.bitError  <= '0';
+
 
          when DATA_S =>
             if rx_r = '0' then
@@ -157,7 +161,13 @@ begin
 
             if rx_r = '1' then
                if curReg.lowCnt >= N_GAP_MIN_G then
-                  nxtReg.state <= DATA_S;
+                  -- more bytes have been received than expected
+                  if curReg.byteCount = NUM_BITS_G then
+                     nxtReg.lenError <= '1';
+                     nxtReg.state    <= IDLE_S;
+                  else
+                     nxtReg.state <= DATA_S;
+                  end if;
                else
                   nxtReg.gapError <= '1';
                   nxtReg.state  <= IDLE_S;
