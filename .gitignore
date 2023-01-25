@@ -15,7 +15,7 @@ prototype-project/dma_intr
 prototype-project/fifo_generator_0_ex
 prototype-project/axis_data_fifo_0_ex
 prototype-project/*
-radiogenic/radiogenic
+simulation-rtd/radiogenic
 .vscode
 .vs
 *root
