@@ -11,7 +11,10 @@ use work.QpixProtoPkg.all;
 entity QpixProtoRegMap is
    generic (
       X_NUM_G : natural := 3;
-      Y_NUM_G : natural := 3
+      Y_NUM_G : natural := 3;
+      Version : std_logic_vector(31 downto 0) := x"0000_0000";
+      N_SAQ_PORTS : natural := 8;
+      TIMESTAMP_BITS : natural := 32
    );
    port (
       clk         : in std_logic;
@@ -33,11 +36,11 @@ entity QpixProtoRegMap is
       daqFrameErrCnt : in std_logic_vector(31 downto 0);
       daqBreakErrCnt : in std_logic_vector(31 downto 0);
 
-      extFifoMax  :   Slv4b2DArray(0 to X_NUM_G-1, 0 to Y_NUM_G-1);
+      extFifoMax  : in Slv4b2DArray;
       
       -- local interfaces
       trgTime     : in std_logic_vector(31 downto 0);
-      hitMask     : out Sl2DArray(0 to X_NUM_G-1, 0 to Y_NUM_G-1);
+      hitMask     : out Sl2DArray;
       timestamp   : out std_logic_vector(31 downto 0);
       chanMask    : out std_logic_vector(G_N_ANALOG_CHAN-1 downto 0);
       swRst       : out std_logic;
@@ -49,17 +52,25 @@ entity QpixProtoRegMap is
       asicData    : out std_logic_vector(15 downto 0);
       asicReq     : out std_logic;
       
-
-      
       memRdReq    : out std_logic;
       memRdAck    : in  std_logic;
       memData     : in  std_logic_vector(31 downto 0);
       memAddr     : out std_logic_vector(G_QPIX_PROTO_MEM_DEPTH-1+2 downto 0);
 
       daqTestWordIn  : in std_logic_vector(G_DATA_BITS-1 downto 0) := (others => '0');
-      daqTestWordOut : out  std_logic_vector(G_DATA_BITS-1 downto 0)
+      daqTestWordOut : out  std_logic_vector(G_DATA_BITS-1 downto 0);
 
-
+      -- SAQ Node values
+      saqMask         : out std_logic_vector(N_SAQ_PORTS - 1 downto 0);
+      saqEnable       : out std_logic;
+      saqForce        : out std_logic;
+      saqPacketLength : out std_logic_vector(31 downto 0);
+      saq_fifo_valid  : in  std_logic;
+      saq_fifo_empty  : in  std_logic;
+      saq_fifo_full   : in  std_logic;
+      saq_fifo_hits   : in  std_logic_vector(31 downto 0);
+      saq_fifo_ren    : out std_logic;
+      saq_fifo_data   : in  std_logic_vector(63 downto 0)
    );
 end entity QpixProtoRegMap;
 
@@ -75,6 +86,8 @@ architecture behav of QpixProtoRegMap is
    signal s_chanMask   : std_logic_vector (G_N_ANALOG_CHAN-1 downto 0)  := (others => '0');
    signal s_asic_mask  : std_logic_vector (15 downto 0) := (others => '1');
    signal test_word_out : std_logic_vector(63 downto 0);
+   signal scratch_word : std_logic_vector(31 downto 0) := Version;
+   signal saq_scratch_word : std_logic_vector(31 downto 0) := x"05a7cafe";
 
 begin
 
@@ -95,13 +108,23 @@ begin
          memRdReq <= '0';
 
          asicReq <= '0';
+         
+         saqForce     <= '0';
+         saq_fifo_ren <= '0';
 
          -- reg mapping
          
-         if s_addr(SUBADDR_RANGE) = x"0" then
+         if s_addr(21 downto 18) = x"0" then
             ack     <= req;
             v_reg_ind := to_integer(unsigned(a_reg_addr));
             case a_reg_addr is 
+               
+               when x"00" =>
+                if wen = '1' and req = '1' then
+                    scratch_word <= wdata;
+                else
+                    rdata <= scratch_word;           
+                end if;
                
                when REGMAP_CMD     =>
                   if wen = '1' and req = '1' and ack = '0' then
@@ -136,7 +159,7 @@ begin
                   end if;
 
                when REGMAP_ASICMASK    =>
-                  if req and wen  then
+                  if req = '1' and wen = '1'  then
                      s_asic_mask <= wdata(15 downto 0);
                   else 
                      rdata <= (others => '0');
@@ -144,7 +167,7 @@ begin
                   end if;
 
                when REGMAP_TESTOUT_H    =>
-                  if req and wen  then
+                  if req = '1' and wen = '1'  then
                      test_word_out(63 downto 32) <= wdata(31 downto 0);
                   else 
                      rdata <= (others => '0');
@@ -152,7 +175,7 @@ begin
                   end if;
 
                when REGMAP_TESTOUT_L    =>
-                  if req and wen  then
+                  if req = '1' and wen = '1'  then
                      test_word_out(31 downto 0) <= wdata(31 downto 0);
                   else 
                      rdata <= (others => '0');
@@ -176,27 +199,95 @@ begin
 
                when REGMAP_TRGTIME =>
                   rdata <= trgTime;
+                  
+               -- include the SAQ Registers here, since there's not enough room in mem to go to '4'
+               -- SAQ Mask, write only
+               when x"50" =>
+                if wen = '1' and req = '1' then
+                    saqMask <= wdata(N_SAQ_PORTS - 1 downto 0);
+                end if;
 
+                -- SAQ Data, read only
+               when x"51"    =>
+                  
+                  if saq_fifo_empty /= '1' then
+                    rdata <= saq_fifo_data(31 downto 0);
+                  else
+                    rdata <= x"fabcdef8";
+                  end if;
+
+                 if req = '1' and ack = '0' then
+                    if saq_fifo_empty /= '1' then
+                        saq_fifo_ren <= '1';
+                    end if;
+                 end if;  
+               
+               when x"52"    =>
+                  if saq_fifo_empty /= '1' then
+                    rdata <= saq_fifo_data(63 downto 32);
+                  else
+                    rdata <= x"fabcdef8";
+                  end if;
+                                 
+               -- SAQ, check if FIFO is empty, if not issue read enable
+               when x"53" =>
+                rdata    <= (others => '0');
+                rdata(0) <= saq_fifo_empty;
+
+                when x"54" =>
+                  if wen = '1' and req = '1' then
+                     saqEnable <= wdata(0);
+                  end if;
+
+                when x"55" =>
+                  if wen = '1' and req = '1' then
+                     saqPacketLength <= wdata;
+                  else
+                     rdata <= saqPacketLength;
+                  end if;
+
+               -- saq_scratch
+               when x"5f" =>
+                if wen = '1' and req = '1' then
+                    saq_scratch_word <= wdata;
+                else
+                    rdata <= saq_scratch_word;           
+                end if;    
+                
+              when x"56" =>
+                  rdata <= saq_fifo_hits;
+
+              -- force packet
+              when x"57" =>
+                  if wen = '1' and req = '1' then
+                     saqForce <= wdata(0);
+                  end if;
+
+               
+               
                when others => 
                   rdata <= x"0BAD_ADD0";
 
             end case;
+
          -- event memory
-         elsif s_addr(SUBADDR_RANGE) = x"1" then
+         elsif s_addr(21 downto 18) = x"1" then
             memRdReq <= req;
-            ack     <= memRdAck;
-            if req then 
+            ack      <= memRdAck;
+            if req = '1' then 
                memAddr <= s_addr(G_QPIX_PROTO_MEM_DEPTH-1+2+2 downto 2);
                rdata   <= memData;
             end if;
+
          -- fifo counters
-         elsif s_addr(SUBADDR_RANGE) = x"2" then
+         elsif s_addr(21 downto 18) = x"2" then
             ack <= req;
             iX := to_integer(unsigned(a_reg_addr(3 downto 0)));
             iY := to_integer(unsigned(a_reg_addr(7 downto 4)));
             rdata <= extFifoMax(iX,iY);
+
          -- asic reg request
-         elsif s_addr(SUBADDR_RANGE) = x"3" then
+         elsif s_addr(21 downto 18) = x"3" then
             ack         <= req;
             rdata       <= x"aaaa_bbbb";
             if req = '1' and ack = '0' then
@@ -206,6 +297,68 @@ begin
                asicAddr    <= (others => '0');
                asicAddr(9 downto 0)  <= s_addr(11 downto 2);
             end if;
+
+         -- SAQ Address Space
+--         elsif s_addr(21 downto 18) = x"4" then
+            
+--            ack <= req;
+            
+--            case a_reg_addr is
+
+--               when x"00" =>
+--                if wen = '1' and req = '1' then
+--                    scratch_word <= wdata;
+--                else
+--                    rdata <= scratch_word;
+--                end if;
+
+--               -- SAQ Mask, write only
+--               when x"01" =>
+--                if wen = '1' and req = '1' then
+--                    saqMask <= wdata(N_SAQ_PORTS - 1 downto 0);
+--                end if;
+
+--                -- SAQ Data, read only
+--               when x"02"    =>
+                  
+--                  if saq_fifo_empty /= '1' then
+--                    rdata <= saq_fifo_data(31 downto 0);
+--                  else
+--                    rdata <= x"fabcdef8";
+--                  end if;
+
+--                 if req = '1' and ack = '0' then
+--                    if saq_fifo_empty /= '1' then
+--                        saq_fifo_ren <= '1';
+--                    end if;
+--                 end if;  
+               
+--               when x"03"    =>
+--                  if saq_fifo_empty /= '1' then
+--                    rdata <= saq_fifo_data(63 downto 32);
+--                  else
+--                    rdata <= x"fabcdef8";
+--                  end if;
+                                 
+--               -- SAQ, check if FIFO is empty, if not issue read enable
+--               when x"04" =>
+
+--                rdata    <= (others => '0');
+--                rdata(0) <= saq_fifo_empty;
+
+--                when x"05" =>
+--                  if wen = '1' and req = '1' then
+--                     saqEnable <= wdata(0);
+--                  end if;
+                
+
+--               -- Bad SAQ Word
+--               when others =>
+--                  rdata <= x"5BAD_ADD5";
+                  
+--             end case;
+
+         -- unknown register addr
          else
             rdata <= x"0BAD_ADD0";
             ack <= req;

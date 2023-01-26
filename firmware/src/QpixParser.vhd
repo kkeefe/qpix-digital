@@ -17,21 +17,24 @@ entity QpixParser is
       qpixConf            : in QpixConfigType;
       fifoFull            : in std_logic;
       
-      -- input to ASIC 
-      inBytesArr          : in  QpixByteArrType;
+      -- input data from ASICs / output data to route
+      inBytesArr          : in  QpixByteArrType; -- array(3 downto 0) of slv(63 downto 0)
       inBytesValid        : in  std_logic_vector(3 downto 0); 
       inBytesAck          : out std_logic_vector(3 downto 0);
-      inData              : out QpixDataFormatType;
+      parseDataTx         : out QpixDataFormatType;
       
-      -- output from ASIC
-      outData             : in  QpixDataFormatType;
-      outBytesArr         : out QpixByteArrType;
+      -- input from QpixRoute, to send to ASIC
+      parseDataRx         : in  QpixDataFormatType;
+      outBytesArr         : out QpixByteArrType; -- array(3 downto 0) of slv(63 downto 0)
       outBytesValidArr    : out std_logic_vector(3 downto 0);
       txReady             : in  std_logic;
 
+      -- RefFile configuration
+      qpixConf            : in QpixConfigType;
+
+      -- Comm communication register data
       regData             : out QpixRegDataType;
       regResp             : in QpixRegDataType
-      
    );
 end entity QpixParser;
 
@@ -57,11 +60,9 @@ architecture behav of QpixParser is
 
 begin
 
-
-   
-   ------------------------------------------------------------
-   -- mux for input channels
-   ------------------------------------------------------------
+   ----------------------------
+   -- mux for input channels --
+   ----------------------------
    process (clk)
       variable imux : natural := 0;
    begin
@@ -144,8 +145,7 @@ begin
    end process;
 
    regData <= regDataR;
-   inData  <= inDataR;
-   ------------------------------------------------------------
+   parseDataTx  <= inDataR;
 
    ------------------------------------------------------------
    -- TX
@@ -155,17 +155,22 @@ begin
       process (clk)
       begin
          if rising_edge (clk) then
+
             outBytesValidArr(i)  <= '0';
-            if outData.DataValid = '1' then
-               if outData.DirMask(i) = '1' then
+
+            if parseDataRx.DataValid = '1' then
+              -- construction of DirMask happens here and why it must be four bits
+               if parseDataRx.DirMask(i) = '1' then
                   -- temporary send either d.Data of convert record FIXME
-                  if outData.WordType = G_WORD_TYPE_REGRSP then
-                     outBytesArr(i) <= outData.Data;
+                  if parseDataRx.WordType = G_WORD_TYPE_REGRSP then
+                     outBytesArr(i) <= parseDataRx.Data;
                   else
-                     outBytesArr(i) <= fQpixRecordToByte(outData);
+                     outBytesArr(i) <= fQpixRecordToByte(parseDataRx);
                   end if;
                   outBytesValidArr(i)  <= '1'; 
                end if;
+
+            -- broadcast the register request
             elsif regDataR.Valid = '1'  then 
                outBytesArr(i)      <= fQpixRegToByte(regDataR);
                outBytesValidArr(i) <= not inBytesMuxValidR(i);
@@ -179,7 +184,4 @@ begin
    end generate;
    ------------------------------------------------------------
 
-
-
 end behav;
-

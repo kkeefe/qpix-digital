@@ -8,6 +8,8 @@ use ieee.numeric_std.all;
 library work;
 use work.QpixPkg.all;
 
+-- std rtl things
+use work.stdrtlpkg.all;
 
 entity QpixRegFile is
    generic (
@@ -22,15 +24,17 @@ entity QpixRegFile is
       rst       : in std_logic;
 
       clkCntRst : in std_logic;
-
-      txReady   : in std_logic;
       extInterS : in std_logic;
       extInterH : in std_logic;
+      intrNum   : in std_logic_vector(15 downto 0);
+
+      -- Register information from Qpixcomm
+      txReady   : in std_logic;
       regData   : in QpixRegDataType;
       regResp   : out QpixRegDataType;
-      intrNum   : in std_logic_vector(15 downto 0);
       
       clkCnt    : out std_logic_vector(31 downto 0);
+      -- Register information to QpixRoute
       qpixConf  : out QpixConfigType;
       qpixReq   : out QpixRequestType
       
@@ -124,7 +128,6 @@ begin
       );
 
    --------------------------------------------------
-   --------------------------------------------------
    process (clk)
    begin
       if rising_edge (clk) then
@@ -133,7 +136,7 @@ begin
             qpixReq_r  <= QpixRequestZero_C;
             regResp_r  <= QpixRegDataZero_C;
          else
-            qpixReq_r       <= QpixRequestZero_C;
+            qpixReq_r         <= QpixRequestZero_C;
 
             qpixReq_r.InterrogationHard <= extInterS_r;
             qpixReq_r.InterrogationSoft <= extInterH_r;
@@ -142,30 +145,34 @@ begin
             regResp_r.OpRead  <= '0';
             regResp_r.Addr    <= regData.Addr;
             regResp_r.XDest   <= qpixConf_r.XPos;
-            regResp_r.YDest   <= qpixConf_r.YPos;
+            regResp_r.YDest     <= qpixConf_r.YPos;
 
             if regData.Valid = '1' and thisAsicDest = '1' then
                case regData.Addr is
                   -- CMD reg
-                  when x"0001" => 
+                  when toslv(1, G_REG_ADDR_BITS) => 
                      qpixReq_r.InterrogationHard <= regData.Data(0);
                      qpixReq_r.InterrogationSoft <= regData.Data(1);
                      qpixReq_r.AsicReset         <= regData.Data(2);
                      qpixReq_r.ResetState        <= regData.Data(3);
                      qpixReq_r.ReqID             <= regData.ReqID;
-
+                     
                      qpixConf_r.XPos <= regData.XHops;
                      qpixConf_r.YPos <= regData.YHops;
 
-                  -- Get current time
-                  when x"0002" =>
+                  -- TIMEOUT reg
+                  when toslv(2, G_REG_ADDR_BITS) =>
+                     if regData.OpWrite = '1' then
+                        qpixConf_r.Timeout <= regData.Data;
+                     end if;
+
                      if regData.OpRead = '1' then
                         regResp_r.Addr  <= std_logic_vector(cnt(31 downto 16));
                         regResp_r.Data  <= std_logic_vector(cnt(15 downto 0));
                      end if;
 
                   -- DirMask and Manual routing
-                  when x"0003" =>
+                  when toslv(3, G_REG_ADDR_BITS) =>
                      if regData.OpWrite = '1' then
                         qpixConf_r.DirMaskMan <= regData.Data(3 downto 0);
                         qpixConf_r.ManRoute   <= regData.Data(4);
@@ -197,6 +204,34 @@ begin
                         regResp_r.Data <= (others => '0');
                      end if;
 
+
+                  -- Time register - used for calibration signals
+                  when toslv(4, G_REG_ADDR_BITS) =>
+                     if regData.OpRead = '1' then
+                        regResp_r.Addr <= clkCnt(31 downto 16);
+                        regResp_r.Data <= clkCnt(15 downto 0);
+                        regResp_r.XDest <= std_logic_vector(to_unsigned(X_POS_G, G_POS_BITS));
+                        regResp_r.YDest <= std_logic_vector(to_unsigned(Y_POS_G, G_POS_BITS));
+                        regResp_r.Valid <= '1';
+                     end if;
+
+
+                  -- Enable register - used to turn on taking real data
+                  when toslv(5, G_REG_ADDR_BITS) =>
+                     if regData.OpWrite = '1' then
+                        qpixConf_r.locEnaSnd <= regData.Data(0);
+                        qpixConf_r.locEnaRcv <= regData.Data(1);
+                        qpixConf_r.locEnaReg <= regData.Data(2);
+                     end if;
+                     if regData.OpRead = '1' then
+                        regResp_r.Addr <= regData.Addr;
+                        regResp_r.Data <= (others => '0');
+                        regResp_r.Data(2 downto 0) <= qpixConf_r.locEnaReg & qpixConf_r.locEnaRcv & qpixConf_r.locEnaSnd;
+                        regResp_r.XDest <= std_logic_vector(to_unsigned(X_POS_G, G_POS_BITS));
+                        regResp_r.YDest <= std_logic_vector(to_unsigned(Y_POS_G, G_POS_BITS));
+                        regResp_r.Valid <= '1';
+                     end if;
+                  
                   -- Disable specific receivers
                   when x"0006" =>
                      if regData.OpWrite = '1' then
@@ -224,6 +259,7 @@ begin
                         regResp_r.Data <= intrNum;
                      end if;
 
+                  -- defaults
                   when others =>
                      qpixConf_r <= qpixConf_r;
                end case;
@@ -281,6 +317,5 @@ begin
    qpixReq  <= qpixReq_r;
    qpixConf <= qpixConf_r;
    regResp  <= regResp_r;
-
 
 end behav;

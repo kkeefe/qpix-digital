@@ -19,8 +19,6 @@ package QpixPkg is
    constant LT : integer := 2;
    constant UP : integer := 3;
 
-   constant G_DATA_BITS        : natural := 64;
-   constant G_POS_BITS         : natural := 4;
    constant G_REG_ADDR_BITS    : natural := 16;
    constant G_REG_DATA_BITS    : natural := 16;
    constant G_TIMESTAMP_BITS   : natural := 32; 
@@ -31,11 +29,6 @@ package QpixPkg is
    constant G_FIFO_LOC_DEPTH : natural := 6;
    constant G_FIFO_EXT_DEPTH : natural := 7;
 
-   --constant DirUp    : std_logic_vector(3 downto 0) := b"1000";
-   --constant DirRight : std_logic_vector(3 downto 0) := b"0100";
-   --constant DirDown  : std_logic_vector(3 downto 0) := b"0010";
-   --constant DirLeft  : std_logic_vector(3 downto 0) := b"0001";
-
    constant DirUp    : std_logic_vector(3 downto 0) := b"0001";
    constant DirRight : std_logic_vector(3 downto 0) := b"0010";
    constant DirDown  : std_logic_vector(3 downto 0) := b"0100";
@@ -45,23 +38,19 @@ package QpixPkg is
    constant G_WORD_TYPE_REGREQ : std_logic_vector(3 downto 0) := x"3";
    constant G_WORD_TYPE_REGRSP : std_logic_vector(3 downto 0) := x"4";
    constant G_WORD_TYPE_EVTEND : std_logic_vector(3 downto 0) := x"5";
-
-
-
    ------------------------------------------------------------------
 
-   type QpixByteArrType is array(0 to 3) of std_logic_vector(G_DATA_BITS-1 downto 0);
-   type Sl2DArray is array(natural range <>, natural range <>) of std_logic;
+   --type QpixByteArrType is array(0 to 3) of std_logic_vector(G_DATA_BITS-1 downto 0);
+   --type Sl2DArray is array(natural range <>, natural range <>) of std_logic;
    --type SlvArray is array(natural range <>) of std_logic_vector;
    --type Slv2DArray is array(natural range <>, natural range <>) of std_logic_vector;
-   type Slv4b2DArray is array(natural range <>, natural range <>) of std_logic_vector(31 downto 0);
-   type TimeArray2DType is array(natural range<>, natural range<>) of time;
+   --type Slv4b2DArray is array(natural range <>, natural range <>) of std_logic_vector(31 downto 0);
+   --type TimeArray2DType is array(natural range<>, natural range<>) of time;
 
    ------------------------------------------------------------------
 
    ------------------------------------------------------------------
    -- TXRX
-   ------------------------------------------------------------------
    ------------------------------------------------------------------
    type QpixTransceiverTypes is (DUMMY, UART);
    ------------------------------------------------------------------
@@ -81,13 +70,31 @@ package QpixPkg is
       --Data       => (others => '0')
    --);
 
-   ---
-   type QpixTxRxPortsArrType is array(0 to 3) of QpixTxRxPortType;
-   type QpixTxRxVarArrType   is array(natural range <>) of QpixTxRxPortType;
+
+   ------------------------------------------------------------------
+   -- Debug record
+   ------------------------------------------------------------------
+   type QpixDebugType is record
+      extFifoCnt : std_logic_vector(31 downto 0);
+      locFifoCnt : std_logic_vector(31 downto 0);
+   end record;
+
+   constant QpixDebugZero_C : QpixDebugType := (
+      extFifoCnt  => (others => '0'),
+      locFifoCnt  => (others => '0')
+   );
+
    ------------------------------------------------------------------
 
-
-
+  type QpixTxRxVarArrType is array(natural range <>) of QpixTxRxPortType;
+  type QpixByteArrType is array(0 to 3) of std_logic_vector(G_DATA_BITS-1 downto 0);
+-- depdenencies
+  type QpixTxRxPortsArrType is array(0 to 3) of QpixTxRxPortType;
+  type QpixDebug2DArrayType is array(natural range <>, natural range<>) of QpixDebugType;
+-- uncomment for simulation
+type Sl2DArray is array(0 to 3, 0 to 3) of std_logic;
+type Slv4b2DArray is array(0 to 3, 0 to 3) of std_logic_vector(31 downto 0);
+type TimeArray2DType is array(0 to 3, 0 to 3) of time;
 
    ------------------------------------------------------------------
    -- Input port from Qpix analog
@@ -107,7 +114,7 @@ package QpixPkg is
    subtype QpixInPortsType is std_logic_vector(G_N_ANALOG_CHAN-1 downto 0);
    constant QpixInPortsZero_C : QpixInPortsType := (others => '0');
 
-   type QpixInPortsArrType is array(natural range <>, natural range <>) of QpixInPortsType;
+type QpixInPortsArrType is array(natural range <>, natural range <>) of QpixInPortsType;
 
    ------------------------------------------------------------------
 
@@ -219,21 +226,6 @@ package QpixPkg is
    ------------------------------------------------------------------
 
 
-
-   ------------------------------------------------------------------
-   -- Debug record
-   ------------------------------------------------------------------
-   type QpixDebugType is record
-      extFifoCnt : std_logic_vector(31 downto 0);
-      locFifoCnt : std_logic_vector(31 downto 0);
-   end record;
-
-   constant QpixDebugZero_C : QpixDebugType := (
-      extFifoCnt  => (others => '0'),
-      locFifoCnt  => (others => '0')
-   );
-
-   type QpixDebug2DArrayType is array(natural range <>, natural range<>) of QpixDebugType;
    ------------------------------------------------------------------
 
 
@@ -309,9 +301,9 @@ package body QpixPkg is
       --x(63 downto 60) ;  -- reserved
       x.WordType  := d(59 downto 56) ;  -- word type
       x.ChanMask  := d(55 downto 40) ;  -- chan mask
-      x.XPos      := d(39 downto 36) ;           -- x
-      x.YPos      := d(35 downto 32) ;           -- y
-      x.Timestamp := d(31 downto 0 ) ;      -- timestamp
+      x.XPos      := d(39 downto 36) ;  -- x
+      x.YPos      := d(35 downto 32) ;  -- y
+      x.Timestamp := d(31 downto 0 ) ;  -- timestamp
 
       return x;
 
@@ -347,7 +339,7 @@ package body QpixPkg is
    begin
       x(63 downto 60) := (others => '0');  -- reserved
       if d.OpWrite = '0' and d.OpRead = '0' then
-         x(59 downto 56) := x"4";
+         x(59 downto 56) := G_WORD_TYPE_REGRSP;
       else
          x(59 downto 56) := x"3";          -- word type
       end if;
@@ -397,7 +389,7 @@ package body QpixPkg is
       variable x : std_logic_vector(G_DATA_BITS-1 downto 0) := (others => '0');
    begin
       x(63 downto 60) := (others => '0');  -- reserved
-      x(59 downto 56) := x"3";             -- word type
+      x(59 downto 56) := G_WORD_TYPE_REGREQ;             -- word type
       x(55 downto 40) := (others => '0');  -- chan mask
       x(39 downto 36) := d.XDest;           -- x
       x(35 downto 32) := d.YDest;           -- y
@@ -433,7 +425,3 @@ package body QpixPkg is
    end function;
 
 end package body QpixPkg;
-
-
-
-

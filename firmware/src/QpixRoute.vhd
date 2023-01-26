@@ -10,23 +10,30 @@ use work.QpixPkg.all;
 
 entity QpixRoute is
    generic (
-      GATE_DELAY_G    : time    := 1 ns
+      GATE_DELAY_G    : time    := 1 ns;
+      RAM_TYPE        : string  := "block"; -- lattice hardcodes BRAM for lattice, or distributed / block
+      X_POS_G         : natural := 0;
+      Y_POS_G         : natural := 0
    );
    port (
       clk             : in std_logic;
       rst             : in std_logic;
-                      
+      
+      -- Register information from QpixRegFile                
       clkCnt          : in  std_logic_vector(31 downto 0);
       qpixReq         : in  QpixRequestType;
       qpixConf        : in  QpixConfigType;
-                      
+
+      -- QpixDataProc data and enable
       inData          : in  QpixDataFormatType;
-                      
+                          
+      -- Tx/Rx data to QpixComm -> QPixParser
       txReady         : in  std_logic;
       txData          : out QpixDataFormatType;
-
       rxData          : in  QpixDataFormatType;
 
+
+      -- debug information
       busy            : out std_logic;
       intrNum         : out std_logic_vector(15 downto 0);
       extFifoFull     : out std_logic;
@@ -43,7 +50,7 @@ architecture behav of QpixRoute is
    ---------------------------------------------------
    -- Types defenitions
    ---------------------------------------------------
-   
+  
    type RegType is record
       state        :  RouteStatesType;
       stateCnt     :  unsigned(G_REG_DATA_BITS-1 downto 0);
@@ -95,42 +102,91 @@ architecture behav of QpixRoute is
    signal locFull        : std_logic := '0';
 
    signal extFifoEmpty   : std_logic := '0';
-   signal extFifoRen     : std_logic := '0';
+   -- signal extFifoRen     : std_logic := '0';
    signal extFifoDout    : std_logic_vector (G_DATA_BITS-1 downto 0);
    signal extFull        : std_logic := '0';
 
 
    signal respDir        : std_logic_vector(3 downto 0) := (others => '0');
 
+
    ---------------------------------------------------
 
 begin
 
+   with curReg.state select state <=
+      "0000" when IDLE_S,
+      "0001" when REP_LOCAL_S,
+      "0010" when REP_REMOTE_S,
+      "0100" when REP_FINISH_S,
+      "1000" when ROUTE_REGRSP_S,
+      "0000" when others;
+
    ---------------------------------------------------
    -- FIFO for local data
    ---------------------------------------------------
-   FIFO_LOC_U : entity work.fifo_cc
-   generic map(
-      DATA_WIDTH => G_N_ANALOG_CHAN + G_TIMESTAMP_BITS,
-      DEPTH      => G_FIFO_LOC_DEPTH,
-      RAM_TYPE   => "block"
-   )
-   port map(
-      clk   => clk,
-      rst   => rst,
-      din   => locFifoDin,
-      wen   => inData.DataValid,
-      ren   => curReg.locFifoRen,
-      dout  => locFifoDout, 
-      empty => locFifoEmpty,
-      full  => locFull
-   );
+   gen_qdb_fifo_loc: if (RAM_TYPE = "Lattice") generate
+      FIFO_LOC_U : entity work.QDBFifo
+      generic map(
+         DATA_WIDTH => G_N_ANALOG_CHAN + G_TIMESTAMP_BITS, -- 16 + 32 = 48
+         DEPTH      => 9,
+         RAM_TYPE   => "Lattice_loc"
+      )
+      port map(
+         clk   => clk,
+         rst   => rst,
+         din   => locFifoDin,
+         wen   => inData.DataValid,
+         ren   => curReg.locFifoRen,
+         dout  => locFifoDout,
+         empty => locFifoEmpty,
+         full  => locFifoFull
+      );
+   end generate;
+   gen_fifo_loc: if (RAM_TYPE /= "Lattice") generate
+      FIFO_LOC_U : entity work.fifo_cc
+      generic map(
+         DATA_WIDTH => G_N_ANALOG_CHAN + G_TIMESTAMP_BITS,
+         DEPTH      => G_FIFO_LOC_DEPTH,
+         RAM_TYPE   => "block"
+      )
+      port map(
+         clk   => clk,
+         rst   => rst,
+         din   => locFifoDin,
+         wen   => inData.DataValid,
+         ren   => curReg.locFifoRen,
+         dout  => locFifoDout,
+         empty => locFifoEmpty,
+         full  => locFifoFull
+      );
+   end generate;
+   
    locFifoDin <= inData.ChanMask & inData.Timestamp;
    ---------------------------------------------------
 
    ---------------------------------------------------
    -- FIFO for external data
    ---------------------------------------------------
+   gen_qdb_fifo_ext: if (RAM_TYPE = "Lattice") generate
+      FIFO_EXT_U : entity work.QDBFifo
+      generic map(
+         DATA_WIDTH => G_DATA_BITS, -- 64
+         DEPTH      => 9,
+         RAM_TYPE   => "Lattice_ext"
+      )
+      port map(
+         clk   => clk,
+         rst   => rst,
+         din   => rxData.Data,
+         wen   => rxData.DataValid,
+         ren   => curReg.extFifoRen,
+         dout  => extFifoDout,
+         empty => extFifoEmpty,
+         full  => extFifoFull
+      );
+   end generate;
+   gen_fifo_ext: if (RAM_TYPE /= "Lattice") generate
    FIFO_EXT_U : entity work.fifo_cc
    generic map(
       DATA_WIDTH => G_DATA_BITS,
@@ -147,8 +203,46 @@ begin
       empty => extFifoEmpty,
       full  => extFull
    );
+   end generate;
    ---------------------------------------------------
 
+
+   extFifoFullEdgeDet_U : entity work.EdgeDetector 
+      port map ( 
+         clk    => clk,
+         rst    => rst, 
+         input  => extFifoFull,
+         output => extFifoFull_e
+      );
+      
+   ---------------------------------------------------
+   -- Count errors
+   ---------------------------------------------------
+      process (clk)
+         constant locFifoCntMax : std_logic_vector(routeErr_i.locFifoFullCnt'range) := (others => '1');
+         constant extFifoCntMax : std_logic_vector(routeErr_i.extFifoFullCnt'range) := (others => '1');
+      begin
+         if rising_edge (clk) then
+            if rst = '1' then
+               routeErr_i <= routeErrZero_C;
+            else
+               if locFifoFull_e = '1' then
+                  if routeErr_i.locFifoFullCnt /= locFifoCntMax then
+                     routeErr_i.locFifoFullCnt <= routeErr_i.locFifoFullCnt + 1;
+                  end if;
+               end if;
+               if extFifoFull_e = '1' then
+                  if routeErr_i.extFifoFullCnt /= extFifoCntMax then
+                     routeErr_i.extFifoFullCnt <= routeErr_i.extFifoFullCnt + 1;
+                  end if;
+               end if;
+
+            end if;
+            
+         end if;
+      end process;
+   routeErr <= routeErr_i;
+   ---------------------------------------------------
 
 
    ---------------------------------------------------
@@ -175,6 +269,7 @@ begin
 
          -- waiting for interrogation
          when IDLE_S       =>
+
             nxtReg.stateCnt <= (others => '0');
             nxtReg.txData.DataValid <= '0';
 
@@ -196,6 +291,7 @@ begin
 
             nxtReg.locFifoRen <= '0';
             nxtReg.extFifoRen <= '0';
+
 
             if extFifoEmpty = '0' then
                if fQpixGetWordType(extFifoDout) = REGRSP_W then
@@ -249,6 +345,7 @@ begin
                end if;
                nxtReg.stateCnt         <= (others => '0');
             end if;
+
          when REP_FINISH_S => 
             -- all hits are done, send the packet which indicates that
             nxtReg.stateCnt <= curReg.stateCnt + 1;
@@ -304,13 +401,13 @@ begin
                --end if;
             --end if;
 
+
          when others =>
             nxtReg.state <= IDLE_S;
 
       end case;
    end process;
    ---------------------------------------------------
-
 
    ---------------------------------------------------
    -- Synchronous logic
@@ -327,7 +424,8 @@ begin
    end process;
    ---------------------------------------------------
 
-   
+
+   -- register to ports at top level
    txData     <= curReg.txData;
    intrNum    <= std_logic_vector(curReg.intrNum);
    
@@ -343,6 +441,4 @@ begin
    extFifoFull <= extFull;
    locFifoFull <= locFull;
 
-
 end behav;
-
