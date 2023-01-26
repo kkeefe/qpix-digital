@@ -24,9 +24,10 @@ package QpixPkg is
    constant G_TIMESTAMP_BITS   : natural := 32; 
    constant G_N_ANALOG_CHAN    : natural := 16;
 
-   constant G_FIFO_LOC_DEPTH : natural := 7;
-   constant G_FIFO_EXT_DEPTH : natural := 6;
-   constant G_FIFO_MUX_DEPTH : natural := 3;
+   --constant G_FIFO_LOC_DEPTH : natural := 6;
+   --constant G_FIFO_EXT_DEPTH : natural := 7;
+   constant G_FIFO_LOC_DEPTH : natural := 6;
+   constant G_FIFO_EXT_DEPTH : natural := 7;
 
    constant DirUp    : std_logic_vector(3 downto 0) := b"0001";
    constant DirRight : std_logic_vector(3 downto 0) := b"0010";
@@ -201,11 +202,10 @@ type QpixInPortsArrType is array(natural range <>, natural range <>) of QpixInPo
       XPos        : std_logic_vector(G_POS_BITS-1 downto 0);
       YPos        : std_logic_vector(G_POS_BITS-1 downto 0);
       Timeout     : std_logic_vector(G_REG_DATA_BITS-1 downto 0);
+      RxDisable   : std_logic_vector(3 downto 0);
       DirMask     : std_logic_vector(3 downto 0);
       DirMaskMan  : std_logic_vector(3 downto 0); -- directions mask b"URDL"
-      locEnaSnd   : std_logic; -- analog data enabled while sending 
-      locEnaRcv   : std_logic; -- analog data enabled while receiving
-      locEnaReg   : std_logic; -- analog data enabled while reg broadcasting
+      disIfBusy   : std_logic; -- disable local data when transferring data
       ManRoute    : std_logic;
       chanEna     : std_logic_vector(G_N_ANALOG_CHAN-1 downto 0);
 
@@ -215,30 +215,14 @@ type QpixInPortsArrType is array(natural range <>, natural range <>) of QpixInPo
       XPos       => (others => '0'),
       YPos       => (others => '0'),
       Timeout    => (others => '0'), 
+      RxDisable  => (others => '0'),
       DirMask    => (others => '0'),
       DirMaskMan => (others => '0'),
-      locEnaSnd  => '1',
-      locEnaRcv  => '1',
-      locEnaReg  => '1', 
+      disIfBusy  => '0',
       ManRoute   => '0',
       chanEna    => (others => '1')
 
    );
-   ------------------------------------------------------------------
-
-   ------------------------------------------------------------------
-   -- Error statuses
-   ------------------------------------------------------------------
-   type routeErrType is record 
-      locFifoFullCnt : std_logic_vector(3 downto 0);
-      extFifoFullCnt : std_logic_vector(3 downto 0);
-   end record;
-
-   constant routeErrZero_C : routeErrType := (
-      locFifoFullCnt => (others => '0'),
-      extFifoFullCnt => (others => '0')
-   );
-
    ------------------------------------------------------------------
 
 
@@ -249,13 +233,17 @@ type QpixInPortsArrType is array(natural range <>, natural range <>) of QpixInPo
    -- Request type
    ------------------------------------------------------------------
    type QpixRequestType is record
-      Interrogation : std_logic;
-      ResetState    : std_logic;
-      AsicReset     : std_logic;
+      ReqID             : std_logic_vector(3 downto 0);
+      InterrogationHard : std_logic;
+      InterrogationSoft : std_logic;
+      ResetState        : std_logic;
+      AsicReset         : std_logic;
    end record;
 
    constant QpixRequestZero_C : QpixRequestType := (
-      Interrogation => '0',
+      ReqID             => (others => '0'),
+      InterrogationSoft => '0',
+      InterrogationHard => '0',
       ResetState    => '0',
       AsicReset     => '0'
    );

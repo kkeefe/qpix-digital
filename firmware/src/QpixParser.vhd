@@ -15,6 +15,7 @@ entity QpixParser is
       rst                 : in std_logic;
 
       qpixConf            : in QpixConfigType;
+      fifoFull            : in std_logic;
       
       -- input data from ASICs / output data to route
       inBytesArr          : in  QpixByteArrType; -- array(3 downto 0) of slv(63 downto 0)
@@ -52,6 +53,8 @@ architecture behav of QpixParser is
 
    signal regDirResp       : std_logic_vector(3 downto 0) := (others => '0');
    signal fifoRen          : std_logic_vector(3 downto 0) := (others => '0');
+
+   signal RxDisable        : std_logic_vector(3 downto 0) := (others => '0');
 
 
 
@@ -92,15 +95,20 @@ begin
 
    process (clk)
       variable reg : QpixRegDataType := QpixRegDataZero_C;
+      variable rx_ind : std_logic_vector(1 downto 0);
    begin
       if rising_edge (clk) then
          if rst = '1' then 
             inDataR  <= QpixDataZero_C;
             regDataR <= QpixRegDataZero_C;
             thisReqID <= (others => '0');
+            RxDisable <= (others => '0');
          else
             inDataR.DataValid <= '0';
             regDataR.Valid <= '0';
+            RxDisable <= qpixConf.RxDisable;
+
+            rx_ind := inBytesMux(65 downto 64);
 
             if inBytesMuxValidOr = '1'  then
                if fQpixGetWordType(inBytesMux) = REGREQ_W then
@@ -114,7 +122,7 @@ begin
 
                   if reg.SrcDaq = '0' then
                      -- increment X-Y position depending on where the data came from
-                     case inBytesMux(65 downto 64) is
+                     case rx_ind is
                         when b"00" => regDataR.YHops <= std_logic_vector(unsigned(reg.YHops) + 1); 
                         when b"01" => regDataR.XHops <= std_logic_vector(unsigned(reg.XHops) - 1); 
                         when b"10" => regDataR.YHops <= std_logic_vector(unsigned(reg.YHops) - 1); 
@@ -125,9 +133,11 @@ begin
                   regDataR.SrcDaq <= '0';
 
                else
-                  inDataR           <= fQpixByteToRecord(inBytesMux(63 downto 0));
-                  inDataR.Data      <= inBytesMux(inDataR.Data'range);
-                  inDataR.DataValid <= '1';
+                  if RxDisable(to_integer(unsigned(rx_ind))) = '0' then
+                     inDataR           <= fQpixByteToRecord(inBytesMux(63 downto 0));
+                     inDataR.Data      <= inBytesMux(inDataR.Data'range);
+                     inDataR.DataValid <= not fifoFull;
+                  end if;
                end if;
             end if;
          end if;

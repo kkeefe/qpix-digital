@@ -4,7 +4,6 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
-use ieee.std_logic_unsigned.all;
 
 library work;
 use work.QpixPkg.all;
@@ -24,20 +23,23 @@ entity QpixRoute is
       clkCnt          : in  std_logic_vector(31 downto 0);
       qpixReq         : in  QpixRequestType;
       qpixConf        : in  QpixConfigType;
-      
+
+      -- QpixDataProc data and enable
+      inData          : in  QpixDataFormatType;
+                          
       -- Tx/Rx data to QpixComm -> QPixParser
       txReady         : in  std_logic;
       txData          : out QpixDataFormatType;
       rxData          : in  QpixDataFormatType;
 
-      -- QpixDataProc data and enable
-      inData          : in  QpixDataFormatType;
 
       -- debug information
-      debug           : out QpixDebugType;
-      state           : out std_logic_vector(3 downto 0);
-      routeErr        : out routeErrType;                     
-      routeStateInt   : out integer    
+      busy            : out std_logic;
+      intrNum         : out std_logic_vector(15 downto 0);
+      extFifoFull     : out std_logic;
+      locFifoFull     : out std_logic;
+      fsmState        : out std_logic_vector(2 downto 0)
+                      
    );
 end entity QpixRoute;
 
@@ -48,16 +50,22 @@ architecture behav of QpixRoute is
    ---------------------------------------------------
    -- Types defenitions
    ---------------------------------------------------
-    type RegType is record
-      state      :  RouteStatesType;
-      stateCnt   :  std_logic_vector(G_REG_DATA_BITS-1 downto 0);
-      timeout    :  std_logic_vector(qpixConf.Timeout'range);
-      txData     :  QpixDataFormatType;
-      respDir    :  std_logic_vector(3 downto 0);
-      manRoute   :  std_logic;
-      locFifoRen :  std_logic;
-      extFifoRen :  std_logic;
-      debug      :  QpixDebugType;
+  
+   type RegType is record
+      state        :  RouteStatesType;
+      stateCnt     :  unsigned(G_REG_DATA_BITS-1 downto 0);
+      --timeout      :  unsigned(qpixConf.Timeout'range);
+      intTime      :  std_logic_vector(31 downto 0);
+      reqID        :  std_logic_vector(3 downto 0);
+      txData       :  QpixDataFormatType;
+      respDir      :  std_logic_vector(3 downto 0);
+      manRoute     :  std_logic;
+      locFifoRen   :  std_logic;
+      extFifoRen   :  std_logic;
+      softInterr   :  std_logic;
+      intrNum      :  unsigned(15 downto 0);
+      extFull      :  std_logic;
+      locFull      :  std_logic;
    end record;
    ---------------------------------------------------
 
@@ -65,15 +73,20 @@ architecture behav of QpixRoute is
    -- Constants
    ---------------------------------------------------
    constant REG_INIT_C : RegType := (
-      state      => IDLE_S,
-      stateCnt   => (others => '0'),
-      timeout    => (others => '0'),
-      txData     => QpixDataZero_C,
-      respDir    => (others => '0'),
-      manRoute   => '0',
-      locFifoRen => '0',
-      extFifoRen => '0',
-      debug      => QpixDebugZero_C
+      state        => IDLE_S,
+      stateCnt     => (others => '0'),
+      --timeout      => (others => '0'),
+      intTime      => (others => '0'),
+      reqID        => (others => '0'),
+      txData       => QpixDataZero_C,
+      respDir      => (others => '0'),
+      manRoute     => '0',
+      locFifoRen   => '0',
+      extFifoRen   => '0',
+      softInterr   => '0',
+      intrNum      => (others => '0'),
+      extFull      => '0',
+      locFull      => '0'
    );
    ---------------------------------------------------
 
@@ -86,23 +99,18 @@ architecture behav of QpixRoute is
    signal locFifoEmpty   : std_logic := '0';
    signal locFifoDin     : std_logic_vector (G_N_ANALOG_CHAN+G_TIMESTAMP_BITS-1 downto 0);
    signal locFifoDout    : std_logic_vector (G_N_ANALOG_CHAN+G_TIMESTAMP_BITS-1 downto 0);
-   signal locFifoFull    : std_logic := '0';
-   signal locFifoFull_e  : std_logic := '0';
-
+   signal locFull        : std_logic := '0';
 
    signal extFifoEmpty   : std_logic := '0';
    -- signal extFifoRen     : std_logic := '0';
    signal extFifoDout    : std_logic_vector (G_DATA_BITS-1 downto 0);
-   signal extFifoFull    : std_logic := '0';
-   signal extFifoFull_e  : std_logic := '0';
+   signal extFull        : std_logic := '0';
 
 
-   --signal respDir      : std_logic_vector(3 downto 0) := (others => '0');
+   signal respDir        : std_logic_vector(3 downto 0) := (others => '0');
 
-   signal routeErr_i     : routeErrType := routeErrZero_C;
+
    ---------------------------------------------------
-
-   constant timeoutZero_C : std_logic_vector(curReg.timeout'range) := (others => '0');
 
 begin
 
@@ -153,16 +161,9 @@ begin
          full  => locFifoFull
       );
    end generate;
+   
    locFifoDin <= inData.ChanMask & inData.Timestamp;
    ---------------------------------------------------
-
-   locFifoFullEdgeDet_U : entity work.EdgeDetector 
-      port map ( 
-         clk    => clk,
-         rst    => rst, 
-         input  => locFifoFull,
-         output => locFifoFull_e
-      );
 
    ---------------------------------------------------
    -- FIFO for external data
@@ -200,10 +201,11 @@ begin
       ren   => curReg.extFifoRen,
       dout  => extFifoDout, 
       empty => extFifoEmpty,
-      full  => extFifoFull
+      full  => extFull
    );
    end generate;
    ---------------------------------------------------
+
 
    extFifoFullEdgeDet_U : entity work.EdgeDetector 
       port map ( 
@@ -246,50 +248,57 @@ begin
    ---------------------------------------------------
    -- Combinational logic
    ---------------------------------------------------
-   process (curReg, inData, rxData, qpixReq, qpixConf, extFifoEmpty, 
+   process (curReg, qpixReq, qpixConf, extFifoEmpty, extFull, locFull,
             locFifoDout, txReady, extFifoDout, locFifoEmpty, clkCnt)
    begin
       nxtReg <= curReg;
       nxtReg.txData.DataValid <= '0';
 
-      -- keep track of FIFO counts for debugging----
-      if inData.DataValid = '1' then
-         nxtReg.debug.locFifoCnt <= curReg.debug.locFifoCnt + 1;
-      end if;
-      if curReg.locFifoRen = '1' then
-         nxtReg.debug.locFifoCnt <= curReg.debug.locFifoCnt - 1;
-      end if;
-      if rxData.DataValid = '1' and curReg.extFifoRen = '0' then
-         nxtReg.debug.extFifoCnt <= curReg.debug.extFifoCnt + 1;
-      end if;
-      if rxData.DataValid = '0' and curReg.extFifoRen = '1' then
-         nxtReg.debug.extFifoCnt <= curReg.debug.extFifoCnt - 1;
-      end if;
-      -----------------------------------------------
-
       nxtReg.manRoute <= qpixConf.ManRoute;
       nxtReg.respDir  <= qpixConf.DirMask;
+
+      if extFull = '1' then 
+         nxtReg.extFull <= '1';
+      end if;
+
+      if locFull = '1' then
+         nxtReg.locFull <= '1';
+      end if;
 
       case (curReg.state) is 
 
          -- waiting for interrogation
          when IDLE_S       =>
 
-            nxtReg.stateCnt   <= (others => '0');
-            nxtReg.txData     <= QpixDataZero_C;
-            nxtReg.locFifoRen <= '0';
-            nxtReg.extFifoRen <= '0';
-            nxtReg.manRoute   <= qpixConf.ManRoute;
-            nxtReg.timeout    <= qpixConf.Timeout;
+            nxtReg.stateCnt <= (others => '0');
+            nxtReg.txData.DataValid <= '0';
 
-            if qpixReq.Interrogation = '1' then
-               nxtReg.state  <= REP_LOCAL_S;
+            if qpixReq.InterrogationSoft = '1' then
+               nxtReg.softInterr <= '1';
             end if;
 
-            nxtReg.timeout  <= qpixConf.Timeout;
-            
-            if extFifoEmpty = '0' and fQpixGetWordType(extFifoDout) = REGRSP_W then
-               nxtReg.state <= ROUTE_REGRSP_S;
+            if qpixReq.InterrogationHard = '1' then
+               nxtReg.softInterr <= '0';
+            end if;
+
+            if qpixReq.InterrogationSoft = '1' or 
+               qpixReq.InterrogationHard = '1' then
+                  nxtReg.state      <= REP_LOCAL_S;
+                  nxtReg.intTime    <= clkCnt;
+                  nxtReg.reqID      <= qpixReq.ReqID;
+                  nxtReg.intrNum    <= curReg.intrNum + 1;
+            end if;
+
+            nxtReg.locFifoRen <= '0';
+            nxtReg.extFifoRen <= '0';
+
+
+            if extFifoEmpty = '0' then
+               if fQpixGetWordType(extFifoDout) = REGRSP_W then
+                  nxtReg.state <= ROUTE_REGRSP_S;
+               else 
+                  nxtReg.state <= REP_REMOTE_S;
+               end if;
             end if;
 
          when ROUTE_REGRSP_S => 
@@ -329,7 +338,11 @@ begin
                end if;
             else
                nxtReg.locFifoRen <= '0';
-               nxtReg.state            <= REP_FINISH_S;
+               if curReg.softInterr = '1' then
+                  nxtReg.state            <= REP_REMOTE_S;
+               else
+                  nxtReg.state            <= REP_FINISH_S;
+               end if;
                nxtReg.stateCnt         <= (others => '0');
             end if;
 
@@ -339,14 +352,18 @@ begin
             if txReady = '1' then
                if curReg.stateCnt(1) = '1' then
                   nxtReg.txData.DataValid <= '1';
-                  nxtReg.txData.ChanMask  <= (others => '0');
+                  nxtReg.txData.ChanMask  <= '0' & curReg.locFull & curReg.extFull & curReg.reqID & 
+                                             std_logic_vector(curReg.intrNum(8 downto 0));
                   nxtReg.txData.XPos      <= qpixConf.XPos;
                   nxtReg.txData.YPos      <= qpixConf.YPos;
-                  nxtReg.txData.Timestamp <= clkCnt(15 downto 0) & clkCnt(15 downto 0); -- FIXME
+                  nxtReg.txData.Timestamp <= curReg.intTime; 
                   nxtReg.txData.DirMask   <= curReg.respDir;
                   nxtReg.txData.WordType  <= G_WORD_TYPE_EVTEND;
                   nxtReg.state            <= REP_REMOTE_S;
                   nxtReg.stateCnt         <= (others => '0');
+
+                  nxtReg.extFull <= '0';
+                  nxtReg.locFull <= '0';
                end if;
             end if;
 
@@ -355,36 +372,35 @@ begin
 
             nxtReg.stateCnt <= curReg.stateCnt + 1;
             nxtReg.extFifoRen <= '0';
-            if extFifoEmpty = '0' and txReady = '1' then 
-               if curReg.extFifoRen = '0' and curReg.stateCnt(1) = '1' then
-                  nxtReg.extFifoRen <= '1';
-                  nxtReg.txData           <= fQpixByteToRecord(extFifoDout);
-                  nxtReg.txData.DataValid <= '1';
-                  nxtReg.txData.DirMask   <= curReg.respDir;
-                  -- replace some data FIXME : temporary
-                  if extFifoDout(59 downto 56) = G_WORD_TYPE_EVTEND then
-                     nxtReg.txData.Timestamp <= clkCnt(15 downto 0) & extFifoDout(15 downto 0);
+            if extFifoEmpty = '0' then
+               if txReady = '1' then 
+                  if curReg.extFifoRen = '0' and curReg.stateCnt(1) = '1' then
+                     nxtReg.extFifoRen <= '1';
+                     nxtReg.txData           <= fQpixByteToRecord(extFifoDout);
+                     nxtReg.txData.DataValid <= '1';
+                     nxtReg.txData.DirMask   <= curReg.respDir;
+                  else
+                     nxtReg.extFifoRen <= '0';
                   end if;
-               else
+               else 
                   nxtReg.extFifoRen <= '0';
+                  nxtReg.txData.DataValid <= '0';
                end if;
             else
-               nxtReg.extFifoRen <= '0';
-               nxtReg.txData.DataValid <= '0';
+               nxtReg.state <= IDLE_S;
                --nxtReg.txData <= QpixDataZero_C;
             end if;
+            
+            --if curReg.timeout /= timeoutZero_C then 
+               --if curReg.stateCnt(curReg.timeout'range) = curReg.timeout then
+                  --nxtReg.state <= IDLE_S;
+               --end if;
+            --else
+               --if qpixReq.ResetState = '1' then
+                  --nxtReg.state <= IDLE_S;
+               --end if;
+            --end if;
 
-            -- TODO / NOTE: where is timeout counting?
-            -- simulate this
-            if curReg.timeout /= timeoutZero_C then 
-               if curReg.stateCnt(curReg.timeout'range) = curReg.timeout then
-                  nxtReg.state <= IDLE_S;
-               end if;
-            else
-               if qpixReq.ResetState = '1' then
-                  nxtReg.state <= IDLE_S;
-               end if;
-            end if;
 
          when others =>
             nxtReg.state <= IDLE_S;
@@ -411,8 +427,18 @@ begin
 
    -- register to ports at top level
    txData     <= curReg.txData;
-   debug      <= curReg.debug;
+   intrNum    <= std_logic_vector(curReg.intrNum);
+   
+   with curReg.state select fsmState <= 
+   "000" when IDLE_S,
+   "001" when ROUTE_REGRSP_S,
+   "010" when REP_LOCAL_S,
+   "010" when REP_FINISH_S,
+   "100" when REP_REMOTE_S;
 
+   busy <= '0' when curReg.state = IDLE_S else '1';
 
+   extFifoFull <= extFull;
+   locFifoFull <= locFull;
 
 end behav;

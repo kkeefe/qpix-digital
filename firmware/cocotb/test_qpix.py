@@ -17,6 +17,8 @@ from collections import namedtuple
 import numpy as np
 import pprint
 
+from termcolor import colored
+
 from qpix_cocotb import *
 from mycocolib import *
 
@@ -53,7 +55,6 @@ def QpixStartClocks(dut):
 ################################################################
 @cocotb.test()
 async def test_hits_readout(dut):
-  # dut._log.setLevel(logging.DEBUG)
   """ test """
 
   QpixStartClocks(dut)
@@ -66,19 +67,24 @@ async def test_hits_readout(dut):
   
   await TimerClk(dut.clk, 10)
 
-  print("Inject hits");
-  await daq.QpixInjectHits(x = 2, y = 2, chanMask = 1,  n = 10)
-  await daq.QpixInjectHits(x = 1, y = 0, chanMask = 15, n = 10)
-  await daq.QpixInjectHits(x = 0, y = 1, chanMask = 7,  n = 10)
+  daq.log.info(colored("Inject hits",'cyan'));
 
-  print("Interrogation")
+  for x in range(dut.X_NUM_G.value):
+    for y in range(dut.Y_NUM_G.value):
+      await daq.QpixInjectHits(x, y, chanMask = 1,  n = 7)
+  # await daq.QpixInjectHits(x = 2, y = 2, chanMask = 1,  n = 10)
+  # await daq.QpixInjectHits(x = 1, y = 0, chanMask = 15, n = 10)
+  # await daq.QpixInjectHits(x = 0, y = 1, chanMask = 7,  n = 10)
+  # await daq.QpixInjectHits(x = 13, y = 9, chanMask = 7,  n = 50)
+  
+  daq.log.info("Interrogation")
   await daq.Interrogation()
 
   daq.CheckHits()
 
   await QpixWaitUntilAllIdle(dut)
 
-  print("All ASICs are idle at : ", get_sim_time('ns'))
+  daq.log.info('All ASICs are idle at : %d ' % (get_sim_time('ns')))
 
   await Timer(2000, 'ns')
 ################################################################

@@ -91,11 +91,11 @@ async def QpixPrintArray(dut):
         fifoext_array[y][x] = fe 
 
     if trig :
-      print("******FSM / FIFO_LOC / FIFO_EXT *******")
+      dut._log.debug("******FSM / FIFO_LOC / FIFO_EXT *******")
       for i in range(nY):
-        print(state_array[i], fifoloc_array[i], fifoext_array[i] )
+        dut._log.debug(f'{state_array[i]}, \t {fifoloc_array[i]}, \t {fifoext_array[i]}' )
         f.write(f'{state_array[i]}, \t {fifoloc_array[i]}, \t {fifoext_array[i]} \n' )
-      print("****************")
+      dut._log.debug("****************")
       f.write('\n')
   f.close()
 ################################################################
@@ -115,10 +115,15 @@ class QpixDaq :
     self.dut = dut
     dut.rst.value = 0
 
+    self.log = logging.getLogger("cocotb.tb")
+    self.log.setLevel(logging.INFO)
+
+    dut.EndeavorScale.value = 4
+
     self.nX, self.nY = int(dut.X_NUM_G.value), int(dut.Y_NUM_G.value)
 
-    self.timeout0 = (self.dut.N_ONE_CLK_G.value + self.dut.N_GAP_CLK_G.value)
-    self.timeout0 *= 64*(self.nX + self.nY) + 500
+    self.transact_time = (self.dut.N_ONE_CLK_G.value + self.dut.N_GAP_CLK_G.value) * 64 + self.dut.N_FIN_CLK_G.value 
+    self.timeout0 = self.transact_time*(self.nX + self.nY + self.nX*self.nY) + 100 
     # set initial values for the input ports
     for i in range(self.nX) : 
       for j in range(self.nY) :
@@ -158,7 +163,7 @@ class QpixDaq :
         w   = QpixGetWordType(dat) 
         if w  == 5 : 
           hitData = QpixDataFormat(dat)
-          print(hitData, int(self.dut.daqTimestamp.value))
+          self.log.debug(f'{hitData} {int(self.dut.daqTimestamp.value)}')
           self.markers.append(hitData)
           self.stat_matrix[hitData.yPos][hitData.xPos] += 1
           assert self.stat_matrix[hitData.yPos][hitData.xPos] < 2, "ASIC finish word received twice"
@@ -167,28 +172,31 @@ class QpixDaq :
           self.hits.append(hitData)
         elif w == 4 : 
           regData = QpixRegFormat(dat)
-          print(regData)
+          self.log.debug(regData)
           self.stat_matrix[regData.y][regData.x] += 1
           self.rsp_matrix[regData.y][regData.x]  += 1
           self.regRsps.append(regData) 
         else : 
           assert "Wrong word type received by DAQ node" 
 
-        print("******** DAQ *********")
+        self.log.debug("******** DAQ *********")
         for r in self.stat_matrix:
-          print(r)
-        print("**********************")
+          self.log.debug(r)
+        self.log.debug("**********************")
 
 
   @coroutine
   async def WaitAllHitsCollected(self) : 
     timeout_cnt = 0
-    timeout = self.timeout0 + 64*len(self.inHits) 
+    timeout = 2*(self.timeout0 + self.transact_time * len(self.inHits))
     while self.stat_matrix != self.fin_matrix: 
       await RisingEdge(self.dut.clk)
       timeout_cnt += 1
-      if timeout_cnt > timeout : break
+      if timeout_cnt > timeout : 
+        break
+        print("WaitAllHitsCollected :: timed out")
     if self.stat_matrix != self.expected_martix : assert "Missing responses"
+    print("All hits collected, CLK_CNT =",timeout_cnt)
 
   @coroutine
   async def WaitRegResponse(self) : 
@@ -224,7 +232,7 @@ class QpixDaq :
     # wait until all the hits are collected
     await self.WaitAllHitsCollected()
     # reset ASIC sates
-    await self.QpixRegRequest(opWrite = 1, addr = 1, data = 2) 
+    # await self.QpixRegRequest(opWrite = 1, addr = 1, data = 2) 
 
   async def RegRead(self, x = -1, y = -1, addr = 0) : 
     self.regRsps = []

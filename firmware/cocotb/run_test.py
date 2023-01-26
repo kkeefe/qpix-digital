@@ -7,8 +7,8 @@ import os
 # GENERICS
 #************************************************
 TopLevelGenericsFull = {
-    "X_NUM_G" : "10", 
-    "Y_NUM_G" : "8", 
+    "X_NUM_G" : "14", 
+    "Y_NUM_G" : "10", 
     "INDIVIDUAL_CLK_G" : "True",
     "N_ZER_CLK_G" : "8", 
     "N_ONE_CLK_G" : "24",
@@ -26,6 +26,8 @@ TopLevelGenericsFull = {
 TopLevelGenericsFast = {
     "X_NUM_G" : "3", 
     "Y_NUM_G" : "3", 
+    # "X_NUM_G" : "14", 
+    # "Y_NUM_G" : "10", 
     "INDIVIDUAL_CLK_G" : "False",
     "N_ZER_CLK_G" : "2",  #"8", 
     "N_ONE_CLK_G" : "5", #"24",
@@ -44,7 +46,8 @@ TopLevelGenericsFast = {
 #************************************************
 
 def test_qpix():
-
+  os.environ["SIM"] = "questa"
+  
   if os.environ.get('FASTSIM') == '1' :
     TopLevelGenerics = TopLevelGenericsFast;
     print('FAST!!')
@@ -56,7 +59,7 @@ def test_qpix():
   source_files = ["UtilityPkg.vhd", "QpixPkg.vhd", "mem.vhd", "EdgeDetector.vhd", "QpixParser.vhd", 
   "QpixTestPatGen.vhd", "QpixDataProc.vhd", "UartRx.vhd", "UartTx.vhd", "UartTop.vhd", 
   "QpixEndeavorRx.vhd", "QpixEndeavorTx.vhd", "QpixEndeavorTop.vhd", 
-  "QpixComm.vhd", "QpixRegFile.vhd", "QpixRoute.vhd", "QpixAsicTop.vhd", 
+  "QpixComm.vhd", "QpixRegFile.vhd", "QpixRoute.vhd", "PulseShaper.vhd", "QpixDebug.vhd",  "QpixAsicTop.vhd", 
   "imp/QpixAsicArray.vhd", "imp/QpixAsicArrayDaq.vhd"]
   vhdl_sources = [os.path.join(source_dir, f) for f in source_files]
 
@@ -72,8 +75,9 @@ def test_qpix():
     sim_args      = ["-t","ps","-voptargs=+acc"],
     extra_args    = [],
     compile_args  = [],
-    # testcase      = "test_manual_routing",
-    testcase      = "test_single_point_failure",
+    testcase      = "test_hits_readout",
+    #testcase      = "test_manual_routing",
+    # testcase      = "test_single_point_failure",
     parameters    = TopLevelGenerics,
     force_compile = True )
  
