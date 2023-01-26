@@ -23,13 +23,11 @@ package QpixPkg is
    constant G_REG_DATA_BITS    : natural := 16;
    constant G_TIMESTAMP_BITS   : natural := 32; 
    constant G_N_ANALOG_CHAN    : natural := 16;
-   constant G_DATA_BITS        : natural := 64;
-   constant G_POS_BITS         : natural := 4;
-   
--- constant G_FIFO_LOC_DEPTH : natural := 9;
-   constant G_FIFO_LOC_DEPTH : natural := 8;
-   constant G_FIFO_EXT_DEPTH : natural := 8;
-   constant G_FIFO_MUX_DEPTH : natural := 3;
+
+   --constant G_FIFO_LOC_DEPTH : natural := 6;
+   --constant G_FIFO_EXT_DEPTH : natural := 7;
+   constant G_FIFO_LOC_DEPTH : natural := 6;
+   constant G_FIFO_EXT_DEPTH : natural := 7;
 
    constant DirUp    : std_logic_vector(3 downto 0) := b"0001";
    constant DirRight : std_logic_vector(3 downto 0) := b"0010";
@@ -170,6 +168,8 @@ type QpixInPortsArrType is array(natural range <>, natural range <>) of QpixInPo
       Valid   : std_logic;
       XDest   : std_logic_vector(G_POS_BITS-1 downto 0);
       YDest   : std_logic_vector(G_POS_BITS-1 downto 0);
+      XHops   : std_logic_vector(G_POS_BITS-1 downto 0);
+      YHops   : std_logic_vector(G_POS_BITS-1 downto 0);
       OpWrite : std_logic;
       OpRead  : std_logic;
       ReqID   : std_logic_vector(3 downto 0);
@@ -183,6 +183,8 @@ type QpixInPortsArrType is array(natural range <>, natural range <>) of QpixInPo
       Valid   => '0',
       XDest   => (others => '0'),
       YDest   => (others => '0'),
+      XHops   => (others => '0'),
+      YHops   => (others => '0'),
       OpWrite => '0',
       OpRead  => '0',
       ReqID   => (others => '0'),
@@ -197,42 +199,30 @@ type QpixInPortsArrType is array(natural range <>, natural range <>) of QpixInPo
    -- Configuration record
    ------------------------------------------------------------------
    type QpixConfigType is record
-      something   : std_logic;
+      XPos        : std_logic_vector(G_POS_BITS-1 downto 0);
+      YPos        : std_logic_vector(G_POS_BITS-1 downto 0);
       Timeout     : std_logic_vector(G_REG_DATA_BITS-1 downto 0);
+      RxDisable   : std_logic_vector(3 downto 0);
       DirMask     : std_logic_vector(3 downto 0);
-      locEnaSnd   : std_logic; -- analog data enabled while sending 
-      locEnaRcv   : std_logic; -- analog data enabled while receiving
-      locEnaReg   : std_logic; -- analog data enabled while reg broadcasting
+      DirMaskMan  : std_logic_vector(3 downto 0); -- directions mask b"URDL"
+      disIfBusy   : std_logic; -- disable local data when transferring data
       ManRoute    : std_logic;
+      chanEna     : std_logic_vector(G_N_ANALOG_CHAN-1 downto 0);
 
    end record;
 
    constant QpixConfigDef_C : QpixConfigType := (
-      something  => '0',
-      Timeout    => std_logic_vector(to_unsigned(15000,G_REG_DATA_BITS)), -- UART
-      -- Timeout    => (others => '0'), -- Lattice sim testing
-      --Timeout   => std_logic_vector(to_unsigned(100,G_REG_DATA_BITS)),   -- dummy
+      XPos       => (others => '0'),
+      YPos       => (others => '0'),
+      Timeout    => (others => '0'), 
+      RxDisable  => (others => '0'),
       DirMask    => (others => '0'),
-      locEnaSnd  => '0',
-      locEnaRcv  => '0',
-      locEnaReg  => '0',
-      ManRoute   => '0'
+      DirMaskMan => (others => '0'),
+      disIfBusy  => '0',
+      ManRoute   => '0',
+      chanEna    => (others => '1')
+
    );
-   ------------------------------------------------------------------
-
-   ------------------------------------------------------------------
-   -- Error statuses
-   ------------------------------------------------------------------
-   type routeErrType is record 
-      locFifoFullCnt : std_logic_vector(3 downto 0);
-      extFifoFullCnt : std_logic_vector(3 downto 0);
-   end record;
-
-   constant routeErrZero_C : routeErrType := (
-      locFifoFullCnt => (others => '0'),
-      extFifoFullCnt => (others => '0')
-   );
-
    ------------------------------------------------------------------
 
 
@@ -243,13 +233,17 @@ type QpixInPortsArrType is array(natural range <>, natural range <>) of QpixInPo
    -- Request type
    ------------------------------------------------------------------
    type QpixRequestType is record
-      Interrogation : std_logic;
-      ResetState    : std_logic;
-      AsicReset     : std_logic;
+      ReqID             : std_logic_vector(3 downto 0);
+      InterrogationHard : std_logic;
+      InterrogationSoft : std_logic;
+      ResetState        : std_logic;
+      AsicReset         : std_logic;
    end record;
 
    constant QpixRequestZero_C : QpixRequestType := (
-      Interrogation => '0',
+      ReqID             => (others => '0'),
+      InterrogationSoft => '0',
+      InterrogationHard => '0',
       ResetState    => '0',
       AsicReset     => '0'
    );
@@ -265,6 +259,7 @@ type QpixInPortsArrType is array(natural range <>, natural range <>) of QpixInPo
    function fQpixByteToRecord(d : std_logic_vector) return QpixDataFormatType;
    function fQpixGetWordType(x : std_logic_vector) return QpixWordType;
    function fQpixRegToByte(d : QpixRegDataType) return std_logic_vector;
+   function fQpixByteToReg(d : std_logic_vector(G_DATA_BITS-1 downto 0)) return QpixRegDataType;
    function fQpixRegReqToByte(d : QpixRegReqType) return std_logic_vector;
 
    function fQpixGetDirectionMask(x : natural := 0; y : natural := 0) return std_logic_vector;
@@ -346,23 +341,45 @@ package body QpixPkg is
       if d.OpWrite = '0' and d.OpRead = '0' then
          x(59 downto 56) := G_WORD_TYPE_REGRSP;
       else
-         x(59 downto 56) := G_WORD_TYPE_REGREQ;             -- word type
+         x(59 downto 56) := x"3";          -- word type
       end if;
       x(55)           := d.OpWrite;
       x(54)           := d.OpRead;
       x(53)           := d.Dest;
       x(52 downto 49) := d.ReqID;
       x(48)           := d.SrcDaq;
-      x(47 downto 40) := (others => '0');  
-      x(39 downto 36) := d.XDest;           -- x
-      x(35 downto 32) := d.YDest;           -- y
-      x(31 downto 32 - G_REG_ADDR_BITS) := d.Addr; 
+      x(47 downto 44) := d.XHops;
+      x(43 downto 40) := d.YHops;
+      x(39 downto 36) := d.XDest;          -- x
+      x(35 downto 32) := d.YDest;          -- y
+      x(31 downto 16) := d.Addr; 
       x(15 downto 0 ) := d.Data; 
 
       return x;
 
    end function;
    ------------------------------------------------------------------
+
+   function fQpixByteToReg(d : std_logic_vector(G_DATA_BITS-1 downto 0)) 
+      return QpixRegDataType is
+         variable r : QpixRegDataType := QpixRegDataZero_C;
+   begin
+      r.OpWrite  := d(55);
+      r.OpRead   := d(54);
+      r.Dest     := d(53);
+      r.ReqID    := d(52 downto 49);
+      r.SrcDaq   := d(48);
+      r.XHops    := d(47 downto 44);
+      r.YHops    := d(43 downto 40);
+      r.XDest    := d(39 downto 36);
+      r.YDest    := d(35 downto 32);
+      r.Addr     := d(31 downto 16);
+      r.Data     := d(15 downto  0);
+
+      return r;
+   end function;
+
+
 
    ------------------------------------------------------------------
    -- convert register request to byte word to be transmitted
