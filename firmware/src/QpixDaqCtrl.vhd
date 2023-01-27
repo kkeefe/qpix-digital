@@ -142,10 +142,13 @@ begin
          txByteValid => daqTxByteValid, 
          txByteReady => daqTxByteReady,
 
+         scale       => "000",
+
          rxByte      => daqRxByte,
          rxByteValid => daqRxByteValid,
          rxFrameErr  => daqRxFrameErr,
          rxBreakErr  => daqRxBreakErr,
+         rxByteAck   => '1', -- tuned within cocotb to always be 1
          rxGapErr    => open,
          rxState     => open,
 

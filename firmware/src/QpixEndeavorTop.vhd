@@ -82,16 +82,16 @@ begin
 
          scale       => scale,
          disable     => TxRxDisable,
-         rxBusy      => rxBusy
+         rxBusy      => rxBusy,
 
          
-		 -- Byte signal out
+       -- Byte signal out
          rxByte      => rxByte,      -- output
          rxByteValid => rxByteValid, -- output
-         rxState     => rxState,     -- output
+         -- rxState     => rxState,     -- output
          rxByteAck   => rxByteAck,
          
-		 -- Error statuses out
+       -- Error statuses out
          bitError    => rxFrameErr, -- output
          lenError    => rxBreakErr, -- output
          gapError    => rxGapErr,   -- output

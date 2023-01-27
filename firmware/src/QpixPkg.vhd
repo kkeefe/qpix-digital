@@ -19,6 +19,8 @@ package QpixPkg is
    constant LT : integer := 2;
    constant UP : integer := 3;
 
+   constant G_DATA_BITS        : natural := 64;
+   constant G_POS_BITS         : natural := 4;
    constant G_REG_ADDR_BITS    : natural := 16;
    constant G_REG_DATA_BITS    : natural := 16;
    constant G_TIMESTAMP_BITS   : natural := 32; 
