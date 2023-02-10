@@ -10,10 +10,14 @@ from unicodedata import decimal
 import numpy as np
 from dataclasses import dataclass
 
+# Endeavor config bits
 N_ZER_CLK_G = 8
 N_ONE_CLK_G = 24
 N_GAP_CLK_G = 16
 N_FIN_CLK_G = 40
+N_DEFAULT_CLKS = 1700
+N_FRAME_BITS = 64
+N_PIXELS = 16
 
 ## helper functions
 def PrintFifoInfo(asic):
@@ -141,8 +145,8 @@ class QPByte:
       data        : extra value for simulation
 
     NOTE: refactored PixelHit object! Data that are transferred are Bytes~ NOT
-    'hits'. A hit is always a time stamp, but what is transferred is the more
-    generic byte.
+    'hits'. A hit is always a time stamp, but what is transferred is a more
+    generic packet.
 
     NOTE: 2 bits are currently reserved, and formating is defined in QpixPkg.vhd
     """
@@ -211,7 +215,7 @@ class QPByte:
         that should be held to send this byte across
         """
         if self.channelMask is None or self.timeStamp is None:
-            return 1700
+            return N_DEFAULT_CLKS
         else:
 
             highBits = bin(int(self.channelMask)).count("1")
@@ -220,7 +224,7 @@ class QPByte:
             highBits += bin(int(self.originRow)).count("1")
             highBits += bin(int(self.wordType.value)).count("1")
 
-            N_BITS = 64
+            N_BITS = N_FRAME_BITS
             lowBits = N_BITS - highBits
             num_gap = (N_BITS - 1) * N_GAP_CLK_G
 
@@ -523,10 +527,10 @@ class QPixAsic:
     def ReceiveByte(self, queueItem: ProcItem):
         """
         Receive data from a neighbor
-        queueItem - tuple of (asic, dir, byte, inTime)
+        queueItem - tuple of (QPixAsic, AsicDirMask, QPByte, inTime)
 
-        The byte that's received in this function should simulate the behavior of
-        the logic found in QpixParser.vhd
+        The QPByte that's received in this function should simulate the behavior of
+        the logic found in QpixParser.vhd + QpixRoute.vhd
         """
         assert isinstance(
             queueItem.dir, AsicDirMask
@@ -540,88 +544,92 @@ class QPixAsic:
             print(f"WARNING ({self.row},{self.col}) receiving data from non-existent connection! {inDir}")
             return []
 
-        outList = []
-
-        # if the incomming word is a register request, it's from the DAQNODE
-        if inByte.wordType == AsicWord.REGREQ:
-
-            # received this request already?
-            if self._reqID == inByte.ReqID:
-                return []
-            else:
-                self._reqID = inByte.ReqID
-                # dynamic routing if manual routing not enabled
-                if not self.config.ManRoute:
-                    self.config.DirMask = AsicDirMask(inDir)
-
-            # is this word relevant to this asic?
-            isBroadcast = not inByte.Dest
-            forThisAsic = (
-                inByte.XDest == self.row and inByte.YDest == self.col
-            ) or isBroadcast
-            if forThisAsic:
-
-                # if register write
-                if inByte.OpWrite:
-                    self.config = inByte.config
-
-                # if register read, assume happens after broadcasts
-                elif inByte.OpRead:
-                    byteOut = QPByte(
-                        AsicWord.REGRESP, self.row, self.col, config=self.config
-                    )
-                    finishTime = inTime + self.tOsc * byteOut.transferTicks
-                    i = self.config.DirMask.value
-                    destAsic = self.connections[i].asic
-                    fromDir = AsicDirMask((i + 2) % 4)
-                    sendT = self.UpdateTime(finishTime, i, isTx=True)
-                    outList.append((destAsic, fromDir, byteOut, sendT))
-
-                # if it's not a read or a write, it's a command interrogation
-                else:
-                    if inCommand == "Interrogate" or inCommand == "HardInterrogate":
-                        # self._GeneratePoissonHits(inTime)
-                        self._ReadHits(inTime)
-                        # used for keeping track of when this request was received here
-                        self._intID = inByte.ReqID
-                        self._intTick = self.CalcTicks(inTime)
-                    elif inCommand == "Calibrate":
-                        self._localFifo.Write(
-                            QPByte(
-                                AsicWord.REGRESP,
-                                self.row,
-                                self.col,
-                                timeStamp=self.CalcTicks(inTime),
-                                data=inTime,
-                            )
-                        )
-                    if self._localFifo._curSize > 0 or inCommand == "HardInterrogate":
-                        self._changeState(AsicState.TransmitLocal)
-                    else:
-                        self._changeState(AsicState.TransmitRemote)
-                    self._measuredTime.append(self.relTimeNow)
-                    self._command = inCommand
-
-            # BROADCAST
-            # currently ALL register requests are broadcast..
-            for i, connection in enumerate(self.connections):
-                if i != inDir and connection:
-                    transactionCompleteTime = inTime + inByte.transferTicks * self.tOsc
-                    sendT = self.UpdateTime(transactionCompleteTime, i, isTx=True)
-                    outList.append(
-                        (
-                            connection.asic,
-                            AsicDirMask((i + 2) % 4),
-                            inByte,
-                            sendT,
-                            inCommand,
-                        )
-                    )
+        # ASIC has received this request already
+        if inByte.wordType == AsicWord.REGREQ and self._reqID == inByte.ReqID:
+            return []
 
         # all data that is not a register request gets stored on remote fifos
-        else:
+        if inByte.wordType != AsicWord.REGREQ:
             self._remoteFifo.Write(inByte)
+            return []
 
+        # if the incomming word is a register request, it's from the DAQNODE
+        self._reqID = inByte.ReqID
+
+        # dynamic routing if manual routing not enabled
+        if not self.config.ManRoute:
+            self.config.DirMask = AsicDirMask(inDir)
+
+        # is this word relevant to this asic?
+        isBroadcast = not inByte.Dest
+        toThisAsic = inByte.XDest == self.row and inByte.YDest == self.col
+        if toThisAsic or isBroadcast:
+
+            if inByte.OpWrite:
+                self.config = inByte.config
+
+            elif inByte.OpRead:
+                byteOut = QPByte(
+                    AsicWord.REGRESP, self.row, self.col, config=self.config
+                )
+                self._remoteFifo.Write(byteOut)
+                self._changeState(AsicState.TransmitReg)
+
+            # if it's not a read or a write, it's a command interrogation
+            else:
+                if inCommand == "Interrogate" or inCommand == "HardInterrogate":
+                    # self._GeneratePoissonHits(inTime)
+                    self._ReadHits(inTime)
+                    # used for keeping track of when this request was received here
+                    self._intID = inByte.ReqID
+                    self._intTick = self.CalcTicks(inTime)
+                elif inCommand == "Calibrate":
+                    self._localFifo.Write(
+                        QPByte(
+                            AsicWord.REGRESP,
+                            self.row,
+                            self.col,
+                            timeStamp = self.CalcTicks(inTime),
+                            data=inTime,
+                        )
+                    )
+                if self._localFifo._curSize > 0 or inCommand == "HardInterrogate":
+                    self._changeState(AsicState.TransmitLocal)
+                else:
+                    self._changeState(AsicState.TransmitRemote)
+                self._measuredTime.append(self.relTimeNow)
+                self._command = inCommand
+
+        # currently ALL register requests are broadcast..
+        if isBroadcast:
+            return self.Broadcast(queueItem)
+        else:
+            return []
+
+    def Broadcast(self, queueItem: ProcItem) -> list:
+        """
+        Simulate behavior of what an ASIC should do for the broadcast command.
+
+        This algorithm must search all possible edges within the array.
+        """
+        inDir = queueItem.dir.value
+        inByte = queueItem.QPByte
+        inTime = queueItem.inTime
+        inCommand = queueItem.command
+        outList = []
+        for i, connection in enumerate(self.connections):
+            if i != inDir and connection:
+                transactionCompleteTime = inTime + inByte.transferTicks * self.tOsc
+                sendT = self.UpdateTime(transactionCompleteTime, i, isTx=True)
+                outList.append(
+                    (
+                        connection.asic,
+                        AsicDirMask((i + 2) % 4),
+                        inByte,
+                        sendT,
+                        inCommand,
+                    )
+                )
         return outList
 
     def _GeneratePoissonHits(self, targetTime):
@@ -805,6 +813,9 @@ class QPixAsic:
         elif self.state == AsicState.TransmitRemote or self.state == AsicState.TransmitRemoteFull:
             return self._processTransmitRemoteState(targetTime)
 
+        elif self.state == AsicState.TransmitReg:
+            return self._processRegisterResponse(targetTime)
+
         else:
             # undefined state
             print("WARNING! ASIC in undefined state")
@@ -821,14 +832,13 @@ class QPixAsic:
 
     def _processRegisterResponse(self, targetTime):
         """
-        NOTE: Deprecated?? 
         This function simulates the register response state within QpixRoute.vhd
 
         This state sends a REGRESP word back to the local fifo and then returns to
         the IDLE/measuring state.
         """
         respByte = QPByte(AsicWord.REGRESP, self.row, self.col, 0, [0])
-        transactionCompleteTime = self._absTimeNow + self.tOsc + respByte.transferTicks
+        transactionCompleteTime = self._absTimeNow + self.tOsc * respByte.transferTicks
         sendT = self.UpdateTime(transactionCompleteTime, self.config.DirMask.value, isTx=True)
         self._changeState(AsicState.Idle)
         return [(
@@ -965,10 +975,8 @@ class QPixAsic:
         # only update the time in the forward direction if the asic needs to
         if absTime > self._absTimeNow:
 
-            tdiff = absTime - self.relTimeNow
-            cycles = int(tdiff / self.tOsc) + 1
-
             # update the absolute time and relative times / ticks
+            cycles = self.CalcTicks(absTime)
             self._absTimeNow = absTime
             self.relTimeNow += cycles * self.tOsc
             self.relTicksNow += cycles
@@ -1061,21 +1069,29 @@ class DaqData:
         return self.qbyte.timeStamp
 
 class DaqNode(QPixAsic):
+    """
+    Simulated aggregator node which will receive all of the QPByte data from the
+    asics within an array/tile.
+
+    This node should should provide a method for writing out collected data
+    within the data.
+    """
     def __init__(
         self,
         fOsc=30e6,
-        nPixels=16,
+        nPixels=N_PIXELS,
         randomRate=20.0 / 1.0,
         timeout=1000,
         row=None,
         col=None,
-        transferTicks=1700,
+        transferTicks=N_DEFAULT_CLKS,
         debugLevel=0,
     ):
         # makes itself basically like a qpixasic
         super().__init__(
             fOsc, nPixels, randomRate, timeout, row, col, transferTicks, debugLevel
         )
+
         # new members here
         self.isDaqNode = True
         self._localFifo = self.DaqFifo()
@@ -1086,7 +1102,9 @@ class DaqNode(QPixAsic):
 
     def ReceiveByte(self, queueItem: ProcItem):
         """
-        Records Byte to daq
+        Records Byte to daq.
+        This overloads the normal receive byte method from a QPixAsic as the DAQNode ultimately will send
+        data to disc, and thus performs a different function.
         """
         inDir = queueItem.dir
         inByte = queueItem.QPByte
