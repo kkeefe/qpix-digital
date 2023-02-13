@@ -149,6 +149,8 @@ class QPByte:
     generic packet.
 
     NOTE: 2 bits are currently reserved, and formating is defined in QpixPkg.vhd
+
+    NOTE: This dataclass should match the implemention of `QpixDataFormatType`
     """
 
     def __init__(
@@ -429,7 +431,6 @@ class QPixAsic:
         self.randomRate = randomRate
         self.row = row
         self.col = col
-        self._command = None
 
         # timing, absolute and relative with random starting phase
         self.timeoutStart = 0
@@ -544,11 +545,12 @@ class QPixAsic:
             print(f"WARNING ({self.row},{self.col}) receiving data from non-existent connection! {inDir}")
             return []
 
-        # ASIC has received this request already
+        # ASIC has received this request already and should do nothing
         if inByte.wordType == AsicWord.REGREQ and self._reqID == inByte.ReqID:
             return []
 
         # all data that is not a register request gets stored on remote fifos
+        # These data are usually dataframe packets from remote ASICs heading to DAQNode
         if inByte.wordType != AsicWord.REGREQ:
             self._remoteFifo.Write(inByte)
             return []
@@ -598,7 +600,6 @@ class QPixAsic:
                 else:
                     self._changeState(AsicState.TransmitRemote)
                 self._measuredTime.append(self.relTimeNow)
-                self._command = inCommand
 
         # currently ALL register requests are broadcast..
         if isBroadcast:
@@ -781,18 +782,8 @@ class QPixAsic:
         if self.isDaqNode or self._absTimeNow >= targetTime:
             return []
 
-        # Process incoming commands first
-        # all commands move ASIC into transmit local state local queues, and the
-        # command should build up any 'hit' of interest
-        if self._command == "Calibrate":
-            self._command = None
-
-        # an ASIC timestamp request
-        elif self._command == "Interrogate":
-            self._command = None
-
         # if the ASIC is in a push state, check for any new hits, if so start sending them
-        elif self.config.EnablePush:
+        if self.config.EnablePush:
             if self._ReadHits(targetTime) > 0:
                 self.pTimeoutStart = targetTime
                 self._changeState(AsicState.TransmitLocal)
@@ -836,8 +827,11 @@ class QPixAsic:
 
         This state sends a REGRESP word back to the local fifo and then returns to
         the IDLE/measuring state.
+
+        NOTE: this state is ONLY entered from the IDLE state, where during the IDLE
+        state, if remoteFifo is NOT empty and the CURRENT word is not a
         """
-        respByte = QPByte(AsicWord.REGRESP, self.row, self.col, 0, [0])
+        respByte = self._remoteFifo.Read()
         transactionCompleteTime = self._absTimeNow + self.tOsc * respByte.transferTicks
         sendT = self.UpdateTime(transactionCompleteTime, self.config.DirMask.value, isTx=True)
         self._changeState(AsicState.Idle)
@@ -1056,7 +1050,6 @@ class DaqData:
     row - Source Asic Row
     col - Source Asic Col
     QPByte - misc data class container which can store RegResp / RegData and all AsicWord type
-    NOTE: This dataclass should match the implemention of `QpixDataFormatType`
     in QpixPkg.vhd
     """
     daqT: int
@@ -1073,8 +1066,8 @@ class DaqNode(QPixAsic):
     Simulated aggregator node which will receive all of the QPByte data from the
     asics within an array/tile.
 
-    This node should should provide a method for writing out collected data
-    within the data.
+    This node should should provide a method for writing out data collected from
+    the QPixAsicArray.
     """
     def __init__(
         self,
@@ -1106,6 +1099,7 @@ class DaqNode(QPixAsic):
         This overloads the normal receive byte method from a QPixAsic as the DAQNode ultimately will send
         data to disc, and thus performs a different function.
         """
+
         inDir = queueItem.dir
         inByte = queueItem.QPByte
         inTime = queueItem.inTime
@@ -1132,6 +1126,14 @@ class DaqNode(QPixAsic):
 
         return []
 
+    def RegWrite(self, row, col, config):
+        """
+        Helper function which issues a register request to a single ASIC-node.
+        """
+        byte = QPByte(AsicWord.REGREQ, None, None, Dest=1, XDest=row, YDest=col,
+                      ReqID=ReqID, OpWrite=True, config=config)
+        self._reqID += 1
+        return byte
     class DaqFifo(QPFifo):
         """
         DaqFifo works like normal QPFifo but stores different state
