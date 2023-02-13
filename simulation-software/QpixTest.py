@@ -27,10 +27,11 @@ debug = 0
 pTimeout = fNominal/2
 ## test arguments
 dTime = 1e-3
+MAX_TIME = 10
 
 
 ## fixtures
-@pytest.fixture(params=[(2,2),(2,3)])
+@pytest.fixture(params=[(2,2),(2,3), (4,4)])
 def qpix_array(request):
     """
     Creates the default QpixAsicArray for the test bed.
@@ -58,7 +59,7 @@ def qpix_hits(qpix_array):
     hits = []
     for asic in qpix_array:
         nHits = np.random.randint(13)
-        hits.append(np.random.uniform(0,10,nHits))
+        hits.append(np.random.uniform(0, MAX_TIME, nHits))
     return hits
 
 @pytest.fixture
@@ -92,7 +93,7 @@ def qpix_filled_array():
                     hitsPerSec=hitsPerSec, debug=debug, tiledf=tiledf)
 
     for asic in qpa:
-        asic.InjectHits(np.sort(np.random.uniform(1e-9, 10, size=10)))
+        asic.InjectHits(np.sort(np.random.uniform(1e-9, MAX_TIME, size=10)))
 
     return qpa
 
@@ -388,32 +389,29 @@ def ensure_hits(hits, array):
     all of the FIFOs and Daq FIFO's make sense.
     """
 
-    def warn(logic, msg):
-        if logic == False:
-            warnings.warn(msg, UserWarning)
+    def warn(msg):
+        warnings.warn(UserWarning(msg))
         return 1
 
     # make sure that all of the ASIC FIFOs are empty
     for hit, asic in zip(hits, array):
-        msg = f"ASIC ({asic.row},{asic.col}):"
-        bWarn = False
+        hddr = f"ASIC ({asic.row},{asic.col}) "
         if asic._localFifo._curSize != 0:
-            msg += f" local fifo not empty!"
-            bWarn = True
+            msg = hddr + f" local fifo not empty!"
+            warn(msg)
         if asic._remoteFifo._curSize != 0:
-            msg += f" remote fifo not empty!"
-            bWarn = True
+            msg = hddr + f" remote fifo not empty!"
+            warn(msg)
         if len(asic._localFifo._data) != 0:
-            msg += f" local fifo not counting reads correctly"
-            bWarn = True
+            msg = hddr + f" local fifo not counting reads correctly"
+            warn(msg)
         if len(asic._remoteFifo._data) != 0:
-            msg += f" remote fifo not counting reads correctly"
-            bWarn = True
+            msg = hddr + f" remote fifo not counting reads correctly"
+            warn(msg)
         if len(asic._times) != 0:
-            msg += f" times have NOT been read!"
-            bWarn = True
+            msg = hddr + f" times have NOT been read!"
+            warn(msg)
         assert asic._localFifo._totalWrites == len(hit), f"{msg} not all hits counted as writes"
-    warn(bWarn, msg)
 
     maxTime, nHits = 0, 0
     for hit in hits:
@@ -431,15 +429,14 @@ def ensure_hits(hits, array):
         if data.wordType == AsicWord.EVTEND:
             daq_evt_ends += 1
 
-    msg = "DaqNode warning:"
+    hddr = "DaqNode warning:"
     bWarn = False
     if daqHits != nHits:
-        msg += f"\nDaqNode did not receive all hits before {maxTime}: {daqHits}/{nHits}"
-        bWarn = True
+        msg = hddr + f"\nDaqNode did not receive all hits before {maxTime}: {daqHits}/{nHits}"
+        warn(msg)
     if daq_evt_ends != evt_end_words:
-        bWarn = True
-        msg += f"mismatch on total event end words on daq node"
-    warn(bWarn, msg)
+        msg = hddr + f"mismatch on total event end words on daq node"
+        warn(msg)
 
     return 1
 
@@ -470,6 +467,10 @@ def test_daq_read_data_snake(qpix_array, qpix_hits, int_prd=0.5):
     """
     Ensure that all of the injected hits make it to be read at the DaqNode with
     the procedure of normal interrogation methods to qpix_array.
+
+    This test will count all of the transactions at the local and
+    remote FIFOs in the array to ensure tha the number of transactions make
+    sense.
     """
     rows, cols = qpix_array._nrows, qpix_array._ncols
     r = "Snake"
@@ -494,27 +495,28 @@ def test_daq_read_data_snake(qpix_array, qpix_hits, int_prd=0.5):
     else:
         cur_asic = qpix_array[rows-1][cols-1]
 
-    asicCnt, transactions = 0, 0
+    asicCnt, transactions = 1, 0
     while asicCnt < rows*cols:
 
-        transactions += (cur_asic._localFifo._totalWrites - cur_asic._localFifo._curSize)
+        next_asic = cur_asic.connections[cur_asic.config.DirMask.value].asic
+        if next_asic.isDaqNode:
+            break
+
+        # Count the number of remote transactions this ASIC sent to its neighbor
         for (state, _, _) in cur_asic.state_times:
             if state == AsicState.Finish:
                 transactions += 1
         transactions -= cur_asic._remoteFifo._curSize
-
-        asicCnt += 1
-        next_asic = cur_asic.connections[cur_asic.config.DirMask.value].asic
-        if next_asic.isDaqNode:
-            break
+        transactions += (cur_asic._localFifo._totalWrites - cur_asic._localFifo._curSize)
 
         remote_writes = next_asic._remoteFifo._totalWrites
         msg = f"snake trans. cnt error @ ({next_asic.row},{next_asic.col}) {transactions}/{remote_writes}"
         assert remote_writes == transactions, msg
 
+        asicCnt += 1
         cur_asic = next_asic
 
-    assert asicCnt == rows*cols, "didnt count all ASICs"
+    assert asicCnt == rows*cols, f"didnt count all ASICs. cnt: {asicCnt} != size: {rows*cols}"
 
 def test_daq_read_data_left(qpix_array, qpix_hits, int_prd=0.5):
     """
