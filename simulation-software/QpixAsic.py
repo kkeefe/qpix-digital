@@ -130,8 +130,8 @@ class QPByte:
 
     ARGS:
       wordType    : 4 bit regWord type
-      originRow   : 4 bit value representing x position
-      originCol   : 4 bit value representing y position
+      originRow   : 4 bit value representing x position of sending ASIC
+      originCol   : 4 bit value representing y position of sending ASIC
       # if wordtype == AsicWord.REGREQ
         Dest    : bool, true if writing to individual ASIC, false if broadcast
         OpWrite : bool, true if writing an ASIC
@@ -434,7 +434,6 @@ class QPixAsic:
 
         # timing, absolute and relative with random starting phase
         self.timeoutStart = 0
-        self.pTimeoutStart = 0
         self.config = AsicConfig(AsicDirMask.North, timeout, pTimeout)
         self.transferTicks = transferTicks
         self.transferTime = self.transferTicks * self.tOsc
@@ -785,10 +784,9 @@ class QPixAsic:
         # if the ASIC is in a push state, check for any new hits, if so start sending them
         if self.config.EnablePush:
             if self._ReadHits(targetTime) > 0:
-                self.pTimeoutStart = targetTime
                 self._changeState(AsicState.TransmitLocal)
 
-        elif self.config.SendRemote and self._remoteFifo._curSize > 0:
+        if self.config.SendRemote and self._remoteFifo._curSize > 0:
             self._changeState(AsicState.TransmitRemoteFull)
 
         ## QPixRoute State machine ##
@@ -897,7 +895,7 @@ class QPixAsic:
             return []
 
         # If there's nothing to forward, bring us up to requested time
-        elif self._remoteFifo._curSize == 0:
+        if self._remoteFifo._curSize == 0:
             if targetTime > self.timeoutStart + self.config.timeout * self.tOsc:
                 self.UpdateTime(self.timeoutStart + self.config.timeout * self.tOsc)
                 self._changeState(AsicState.Idle)
@@ -926,6 +924,12 @@ class QPixAsic:
             return hitlist
 
     def timeout(self):
+        """
+        Function describes whether or not the ASIC has timed out.
+
+        This is the control logic for when an ASIC should leave the
+        TransmitRemote state.
+        """
         if self.config.SendRemote == True:
             return self._remoteFifo._curSize == 0
         else:
@@ -1039,6 +1043,32 @@ class QPixAsic:
                 else:
                     self.rxBusy = T
 
+
+@dataclass
+class DaqTimestamp:
+    """
+    struct object to store measured Timestamps accumulated by the DaqNode.
+
+    This class should be used to extract relevant data from the DAQNode FIFO for analysis.
+
+    Members:
+        ReqID - Integer: Request ID sent from the DAQNode which identifies when this was requested
+        Clock - Integer: Records the current clock cycle when this timestamp was measured.
+        Time  - Float: value for the 'true' time that this was recorded
+        Row - Integer: Remote integer value for the ASIC which
+        Col - Integer: Remote integer value for the ASIC which
+        AsicClock - Integer: Records the clock cycle of the remote ASIC when the interrogation was received
+        AsicTime  - Float: value for the 'true' time that this was recorded at the remote ASIC
+    """
+    ReqID = int
+    Clock = int
+    Time = float
+    Row = int
+    Col = int
+    AsicClock = int
+    AsicTime = float
+
+
 @dataclass
 class DaqData:
     """
@@ -1061,6 +1091,7 @@ class DaqData:
     def T(self):
         return self.qbyte.timeStamp
 
+
 class DaqNode(QPixAsic):
     """
     Simulated aggregator node which will receive all of the QPByte data from the
@@ -1068,6 +1099,11 @@ class DaqNode(QPixAsic):
 
     This node should should provide a method for writing out data collected from
     the QPixAsicArray.
+
+    NOTE:
+    The calibration procedure: regardless of the push or pull architecture should
+    be based on a response to a broadcast from the daqnode, which stores tick ID
+    and timestamp within the event end word.
     """
     def __init__(
         self,
@@ -1089,9 +1125,16 @@ class DaqNode(QPixAsic):
         self.isDaqNode = True
         self._localFifo = self.DaqFifo()
 
+        # create a running list of timestamps accumulated from the evtEnd words
+        # during writes here
+        self.nTimestamps = 0
+        self.TimestampIDs = set()
+        self.TimestampData = []
+
         # make sure that the starting daqNode ID is different from the ASIC default
         self._reqID += 1
         self.received_asics = set()
+
 
     def ReceiveByte(self, queueItem: ProcItem):
         """
@@ -1126,7 +1169,25 @@ class DaqNode(QPixAsic):
 
         return []
 
-    def RegWrite(self, row, col, config):
+    def GetTimestamp(self) -> QPByte:
+        """
+        Generate the QPByte which asks for an interrogation from the rest of the array.
+
+        The packet returned here should, if sent to the base-node, create a hard-interrogate
+        packet from all of the ASICs within the array.
+        """
+        ReqID = self._reqID
+        request = QPByte(AsicWord.REGREQ, None, None, timeStamp=self.relTicksNow, ReqID=ReqID)
+
+        # record this reqID and time to measure time
+        self.nTimestamps += 1
+        self.TimestampIDs.add(ReqID)
+
+        # update and create request
+        self._reqID += 1
+        return request
+
+    def RegWrite(self, row, col, config) -> QPByte:
         """
         Helper function which issues a register request to a single ASIC-node.
         """
@@ -1134,9 +1195,21 @@ class DaqNode(QPixAsic):
                       ReqID=ReqID, OpWrite=True, config=config)
         self._reqID += 1
         return byte
+
+    def Calibrate(self):
+        """
+        Use all of the stored FIFO data and their timestamps to
+        create a calibration for all of the recorded ASICs.
+        """
+        pass
+
     class DaqFifo(QPFifo):
         """
-        DaqFifo works like normal QPFifo but stores different state
+        DaqFifo works like normal QPFifo but stores different state variables.
+
+        The main difference is the overloaded Write method which needs to parse
+        different incoming word types to ensure that the DAQNode is receiving what
+        it thinks it should.
         """
         def __init__(self):
             super().__init__()

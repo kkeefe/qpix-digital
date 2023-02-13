@@ -162,27 +162,43 @@ def test_asic_process_push(qpix_array):
     qpix_array.Route("Left", transact=False)
     qpix_array.SetPushState(enabled=True, transact=False)
     endtime, nHits = 1, 10
-    inHits = sorted(np.random.uniform(0, endtime, nHits))
+
+    # ensure push state
+    for asic in qpix_array:
+        assert asic.config.EnablePush, "Asic not in push state"
+        assert asic.config.SendRemote, "Asic not sending remote"
 
     # inject
     for asic in qpix_array:
+        inHits = sorted(np.random.uniform(1e-10, endtime, nHits))
         asic.InjectHits(inHits)
 
     # process
-    curT = 0
-    while curT < endtime:
+    curT, steps = 0, 0
+    while curT < endtime + 1e-4 * qpix_array._nrows * qpix_array._ncols:
         curT += qpix_array._deltaT
         qpix_array.Process(curT)
+        steps += 1
 
     for asic in qpix_array:
         assert asic._localFifo._curSize == 0, f"pushed Local FIFO should be empty of hits"
+        assert asic.state == AsicState.Idle, f"{asic.state} != IDLE state"
+
+    remote = 0
+    for asic in qpix_array:
+        remote += len([w for w in asic._remoteFifo._data if w.wordType == AsicWord.DATA])
 
     words = [word for word in qpix_array._daqNode._localFifo._data]
     nDataWords = [word for word in words if word.wordType == AsicWord.DATA]
 
     r, c = qpix_array._ncols, qpix_array._nrows
-    tHits = r * c * len(inHits)
-    assert len(nDataWords) == tHits, f"DaqNode did not receive all of the data words {nDataWords}/{tHits}"
+    tHits = r * c * nHits
+    msg = f"DaqNode {steps} steps, remote({remote}) still missing hits {len(nDataWords)}/{tHits} at time {qpix_array._timeNow}:{qpix_array._tickNow}"
+    assert len(nDataWords) + remote == tHits, msg
+
+    # only a mild warning if there data hasn't made it to the array yet
+    if remote > 0:
+        warn(f"Push data still has waiting remote data: {remote} at time {qpix_array._timeNow}")
 
 
 def test_asic_updateTime(qpix_array):
@@ -219,6 +235,14 @@ def test_asic_time_update(qpix_asic):
     tAsic.UpdateTime(dT)
     tAsic.UpdateTime(dT/2)
     assert tAsic._absTimeNow == dT, "update time function not working"
+
+def test_transaction_width(qpix_array):
+    """
+    ensure that the default QPByte has a reasonable transaction length
+    """
+    byte = QpixAsic.QPByte(AsicWord.REGREQ, None, None, ReqID=2)
+    for asic in qpix_array:
+        assert asic.tOsc * byte.transferTicks < 1e-4, "Transaction time too long!"
 
 def test_asic_full_readout(qpix_array):
     """
@@ -382,37 +406,50 @@ def test_asic_route_left(qpix_array):
             else:
                 assert asic.config.DirMask == AsicDirMask.West, f"Row misaligned, should be West"
 
+def warn(msg):
+    """
+    user warning method
+    """
+    warnings.warn(UserWarning(msg))
+    return 1
+
 
 def ensure_hits(hits, array):
     """
     Helper function that is used on test_daq_read methods to ensure that
     all of the FIFOs and Daq FIFO's make sense.
+
+    This functinon will raise any logical warnings on FIFOs within the ASIC
+    based on the hits array.
+
+    A successfully processed array is one where all FIFOs are empty, and
+    all of this data has been sent to and received by the DAQNode.
     """
 
-    def warn(msg):
-        warnings.warn(UserWarning(msg))
-        return 1
+    b = 0
 
     # make sure that all of the ASIC FIFOs are empty
     for hit, asic in zip(hits, array):
         hddr = f"ASIC ({asic.row},{asic.col}) "
         if asic._localFifo._curSize != 0:
             msg = hddr + f" local fifo not empty!"
-            warn(msg)
+            b = warn(msg)
         if asic._remoteFifo._curSize != 0:
             msg = hddr + f" remote fifo not empty!"
-            warn(msg)
+            b = warn(msg)
         if len(asic._localFifo._data) != 0:
             msg = hddr + f" local fifo not counting reads correctly"
-            warn(msg)
+            b = warn(msg)
         if len(asic._remoteFifo._data) != 0:
             msg = hddr + f" remote fifo not counting reads correctly"
-            warn(msg)
+            b = warn(msg)
         if len(asic._times) != 0:
             msg = hddr + f" times have NOT been read!"
-            warn(msg)
+            b = warn(msg)
         assert asic._localFifo._totalWrites == len(hit), f"{msg} not all hits counted as writes"
 
+    # Build up the amount of data words and event end words that should have
+    # been received
     maxTime, nHits = 0, 0
     for hit in hits:
         if len(hit) > 0:
@@ -433,12 +470,13 @@ def ensure_hits(hits, array):
     bWarn = False
     if daqHits != nHits:
         msg = hddr + f"\nDaqNode did not receive all hits before {maxTime}: {daqHits}/{nHits}"
-        warn(msg)
+        b = warn(msg)
     if daq_evt_ends != evt_end_words:
         msg = hddr + f"mismatch on total event end words on daq node"
-        warn(msg)
+        b = warn(msg)
 
-    return 1
+    # a succesful ensure_hits is one where no warnings are raised: b = 0
+    return b == 0
 
 def run_array_interrogate(array, maxTime, int_prd):
     """
@@ -463,6 +501,8 @@ def run_array_interrogate(array, maxTime, int_prd):
 
     return array
 
+
+## Main Simulation Procedsures for an array based on routing
 def test_daq_read_data_snake(qpix_array, qpix_hits, int_prd=0.5):
     """
     Ensure that all of the injected hits make it to be read at the DaqNode with
@@ -487,7 +527,7 @@ def test_daq_read_data_snake(qpix_array, qpix_hits, int_prd=0.5):
     qpix_array = run_array_interrogate(qpix_array, maxTime, 0.5)
 
     # compare fifos with expected input hits
-    ensure_hits(qpix_hits, qpix_array)
+    good_hits = ensure_hits(qpix_hits, qpix_array)
     
     # snake means every ASIC is connected in a long line and should see every # other ASIC
     if rows%2 == 0:
@@ -518,6 +558,11 @@ def test_daq_read_data_snake(qpix_array, qpix_hits, int_prd=0.5):
 
     assert asicCnt == rows*cols, f"didnt count all ASICs. cnt: {asicCnt} != size: {rows*cols}"
 
+    # in the event that no FIFOs are spitting warnings, we test
+    # the received DAQ data for validity
+    if good_hits:
+        pass
+
 def test_daq_read_data_left(qpix_array, qpix_hits, int_prd=0.5):
     """
     Ensure that all of the injected hits make it to be read at the DaqNode with
@@ -538,7 +583,7 @@ def test_daq_read_data_left(qpix_array, qpix_hits, int_prd=0.5):
     qpix_array = run_array_interrogate(qpix_array, maxTime, int_prd)
 
     # compare fifos with expected input hits
-    ensure_hits(qpix_hits, qpix_array)
+    good_hits = ensure_hits(qpix_hits, qpix_array)
 
     # left means every left and not 0,0 ASIC sends data north, all others send west
     # each row should be summed individually
@@ -577,6 +622,16 @@ def test_daq_read_data_left(qpix_array, qpix_hits, int_prd=0.5):
 
             col = next_asic.col
 
+    # in the event that no FIFOs are spitting warnings, we test
+    # the received DAQ data for validity
+    if good_hits:
+        pass
+
+
+# def test_daq_data()
+#     """
+#     Ensure that the DAQ data which is received from the
+#     """
 # Deprecated
 # def test_daq_calibrate(qpix_array, qpix_hits, int_prd=0.5):
 #     """

@@ -1,4 +1,5 @@
-from QpixAsic import QPByte, QPixAsic, ProcQueue, DaqNode, AsicWord, AsicState, AsicConfig, AsicDirMask
+from QpixAsic import QPByte, QPixAsic, ProcQueue, DaqNode, AsicWord, AsicState, \
+                     AsicConfig, AsicDirMask, QPException
 import matplotlib.pyplot as plt
 import random
 import math
@@ -444,10 +445,8 @@ class QpixAsicArray():
         assert row < self._nrows and row >= 0, f"row {row} unable for this array"
         assert col < self._ncols and col >= 0, f"col {col} unable for this array"
 
-        # build the DaqNode request
-        ReqID = self._daqNode._reqID
-        byte = QPByte(AsicWord.REGREQ, None, None, Dest=1, XDest=row, YDest=col, ReqID=ReqID, OpWrite=True, config=config)
-        self._daqNode._reqID += 1
+        # build the DaqNode register request
+        byte = self._daqNode.RegWrite(row, col, config)
 
         # issue the byte command, and move forward in time
         timeProc = self._timeNow + timeEnd
@@ -455,28 +454,34 @@ class QpixAsicArray():
 
     def _Command(self, timeEnd, command=None, byte=None):
         """
+        Refactor TODO: This function should be able to remove the command option, since
+        the QPByte member should be sufficienty to determine how a ASIC behaves.
+
         Function for issueing command to base node from daq node, and beginning
         a full readout sequence
         VARS:
             timeEnd - how long the array should be processed until
-            command - string argument that the asics receive to tell them what readout is coming in from DAQnode
+            command - string argument that the asics receive to tell them what readout is coming in from DAQnode.
+            byte    - pre-generated QPByte from the DAQNode which is used to start the simulation process.
 
         NOTE Basic Unit of simulation:
-            ASIC      - receiving data
-            Direction - source direction of incoming data
-            QPByte    - source data, 64 bit word
-            hitTime   - transaction complete time from source ASIC
-            Command   - optional argument passed to receive data to tell receiving
-                        ASIC to behave differently
+            ASIC      - Node which receives incoming QPByte, Rx
+            Direction - QpixAsicDir, direction of incoming QPByte
+            QPByte    - source data, represents 64 bit word sent over Tx/Rx
+            hitTime   - true transaction complete time defined by sending ASIC
+            Command   - optional argument passed to receive data to tell
+                        receiving ASIC to behave differently, this functionality
+                        mirrors packet headers
         """
 
         # add the initial broadcast to the queue
         if byte is None:
-            ReqID = self._daqNode._reqID
-            request = QPByte(AsicWord.REGREQ, None, None, timeStamp=self._tickNow, ReqID=ReqID)
-            self._daqNode._reqID += 1
-        else:
+            request = self._daqNode.GetTimestamp()
+        # the only kinds of bytes that go this else through here are register writes
+        elif byte.WordType == AsicWord.REGREQ:
             request = byte
+        else:
+            raise QPExcpetion("Unknown word type being sent via command")
         self._queue.AddQueueItem(self[0][0], AsicDirMask(3), request, self._timeNow, command=command)
 
         # move the Array forward in time
@@ -566,6 +571,8 @@ class QpixAsicArray():
 
             self._timeNow = self[0][0]._absTimeNow if self._timeNow < self[0][0]._absTimeNow else self._timeNow + self._deltaT
             self._tickNow = int(self._timeNow * self.fNominal) + 1
+            self._daqNode.relTimeNow = self._timeNow
+            self._daqNode.relTicksNow = self._tickNow
 
         return
 

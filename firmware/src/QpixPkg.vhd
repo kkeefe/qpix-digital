@@ -343,7 +343,7 @@ package body QpixPkg is
       if d.OpWrite = '0' and d.OpRead = '0' then
          x(59 downto 56) := G_WORD_TYPE_REGRSP;
       else
-         x(59 downto 56) := x"3";          -- word type
+         x(59 downto 56) := G_WORD_TYPE_REGREQ;          -- word type
       end if;
       x(55)           := d.OpWrite;
       x(54)           := d.OpRead;
