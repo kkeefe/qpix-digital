@@ -628,10 +628,6 @@ def test_daq_read_data_left(qpix_array, qpix_hits, int_prd=0.5):
         pass
 
 
-# def test_daq_data()
-#     """
-#     Ensure that the DAQ data which is received from the
-#     """
 # Deprecated
 # def test_daq_calibrate(qpix_array, qpix_hits, int_prd=0.5):
 #     """
@@ -657,16 +653,18 @@ def test_asic_tick_cnt(qpix_array):
     ensure that an injected hit calculates that correct time
     """
     tAsic = qpix_array[0][0]
-    tHits, nHits = 1e-3, 5
+    tHits, nHits = 3e-3, 1500
     inTime = tHits + qpix_array._deltaT
     inHits = sorted(np.random.uniform(0, tHits, nHits))
     tAsic.InjectHits(inHits)
     tRegReqByte = QpixAsic.QPByte(AsicWord.REGREQ, None, None, ReqID=2)
     proc = QpixAsic.ProcItem(tAsic, QpixAsic.AsicDirMask.West, tRegReqByte, inTime, command="Interrogate")
-    testT = 1
-    tAsic.Process(testT)
+    curT = 0
+    while curT < tHits:
+        curT += qpix_array._deltaT
+        tAsic.Process(curT)
     b = tAsic.ReceiveByte(proc)
-    procTime = inTime + 1e-3 + testT
+    procTime = inTime + tHits + 1
     outHits = tAsic.Process(procTime)
     assert len(outHits) == len(inHits), "Did not read all of the injected hits"
     for inHit, outHit in list(zip(inHits, outHits)):
@@ -682,5 +680,22 @@ if __name__ == "__main__":
                 timeEpsilon=timeEpsilon, timeout=timeout,
                 hitsPerSec=hitsPerSec, debug=debug, tiledf=tiledf)
 
+    tAsic = qpix_array[0][0]
+    tHits, nHits = 3e-3, 70
+    inTime = tHits + qpix_array._deltaT
+    inHits = sorted(np.random.uniform(0, tHits, nHits))
+    tAsic.InjectHits(inHits)
+    tRegReqByte = QpixAsic.QPByte(AsicWord.REGREQ, None, None, ReqID=2)
+    proc = QpixAsic.ProcItem(tAsic, QpixAsic.AsicDirMask.West, tRegReqByte, inTime, command="Interrogate")
+    testT = 1
+    # tAsic.Process(testT)
+    b = tAsic.ReceiveByte(proc)
+    procTime = inTime + 1e-3 + testT
+    outHits = tAsic.Process(procTime)
+    assert len(outHits) == len(inHits), "Did not read all of the injected hits"
+    for inHit, outHit in list(zip(inHits, outHits)):
+        assert inHit == outHit[2].data, "input hit did not get correctly stored in out hit data"
+        tick = int((inHit - tAsic._startTime)/tAsic.tOsc) + 1
+        assert tick == outHit[2].timeStamp, "input timestamp was not calcuated correctly"
 
     input("test")
