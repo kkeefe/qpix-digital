@@ -973,10 +973,9 @@ class QPixAsic:
         if absTime > self._absTimeNow:
 
             # update the absolute time and relative times / ticks
-            cycles = self.CalcTicks(absTime)
             self._absTimeNow = absTime
-            self.relTimeNow += cycles * self.tOsc
-            self.relTicksNow += cycles
+            self.relTicksNow = self.CalcTicks(absTime)
+            self.relTimeNow = self.relTicksNow * self.tOsc + self._startTime
 
         return transT
 

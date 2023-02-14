@@ -681,16 +681,18 @@ if __name__ == "__main__":
                 hitsPerSec=hitsPerSec, debug=debug, tiledf=tiledf)
 
     tAsic = qpix_array[0][0]
-    tHits, nHits = 3e-3, 70
+    tHits, nHits = 3e-3, 1500
     inTime = tHits + qpix_array._deltaT
     inHits = sorted(np.random.uniform(0, tHits, nHits))
     tAsic.InjectHits(inHits)
     tRegReqByte = QpixAsic.QPByte(AsicWord.REGREQ, None, None, ReqID=2)
     proc = QpixAsic.ProcItem(tAsic, QpixAsic.AsicDirMask.West, tRegReqByte, inTime, command="Interrogate")
-    testT = 1
-    # tAsic.Process(testT)
+    curT = 0
+    while curT < tHits:
+        curT += qpix_array._deltaT
+        tAsic.Process(curT)
     b = tAsic.ReceiveByte(proc)
-    procTime = inTime + 1e-3 + testT
+    procTime = inTime + tHits + 1e-3
     outHits = tAsic.Process(procTime)
     assert len(outHits) == len(inHits), "Did not read all of the injected hits"
     for inHit, outHit in list(zip(inHits, outHits)):
