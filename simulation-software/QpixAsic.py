@@ -1,7 +1,5 @@
 #!/usr/bin/python3
 
-from audioop import add
-from io import IncrementalNewlineDecoder
 import random
 import math
 import time
@@ -19,7 +17,7 @@ N_DEFAULT_CLKS = 1700
 N_FRAME_BITS = 64
 N_PIXELS = 16
 
-## helper functions
+# helper functions
 def PrintFifoInfo(asic):
     print("\033[4m" + f"asic ({asic.row},{asic.col}) Local Fifo" + "\033[0m")
     print(
@@ -140,7 +138,7 @@ class QPByte:
         SrcDaq  : bool, true if coming from DAQNode
         config  : AsicConfig, struct containing ASIC configuration
       # else this is a data word
-        timeStamp   : 32 bit time stamp
+        timeStamp   : 32 bit time stamp, should only accept return value of QpixAsic.CalcTicks()
         channelList : 16 bit channel map
       data        : extra value for simulation
 
@@ -192,6 +190,8 @@ class QPByte:
             self.config = config
         elif self.wordType == AsicWord.REGRESP:
             self.config = config
+        elif self.wordType == AsicWord.EVTEND:
+            self.ReqID = ReqID
         else:
             self.channelMask = 0
             if channelList is not None:
@@ -782,9 +782,8 @@ class QPixAsic:
             return []
 
         # if the ASIC is in a push state, check for any new hits, if so start sending them
-        if self.config.EnablePush:
-            if self._ReadHits(targetTime) > 0:
-                self._changeState(AsicState.TransmitLocal)
+        if self.config.EnablePush and self._ReadHits(targetTime) > 0:
+            self._changeState(AsicState.TransmitLocal)
 
         if self.config.SendRemote and self._remoteFifo._curSize > 0:
             self._changeState(AsicState.TransmitRemoteFull)
@@ -869,7 +868,7 @@ class QPixAsic:
         the event fifo, send it, and proceed to the transmit remote state.
         """
         # send the finish packet word
-        finishByte = QPByte(AsicWord.EVTEND, self.row, self.col, self._intTick, data=self._intID)
+        finishByte = QPByte(AsicWord.EVTEND, self.row, self.col, self._intTick, ReqID=self._intID)
         transactionCompleteTime = self._absTimeNow + self.tOsc * finishByte.transferTicks
         sendT = self.UpdateTime(transactionCompleteTime, self.config.DirMask.value, isTx=True)
 
