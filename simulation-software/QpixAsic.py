@@ -44,6 +44,13 @@ class QPException(Exception):
 
 
 class AsicDirMask(Enum):
+    """
+    This class maintains values to represent directionality for ASIC
+    connections.
+
+    These values are implemented in QPixAsicArray constructor during _makeArray
+    call.
+    """
     North = 0
     East = 1
     South = 2
@@ -54,6 +61,9 @@ class AsicState(Enum):
     """
     Enum class based on the QpixRoute.vhd FSM states. Transitions to and from these
     states should be modeled on the inputs defined in QpixRoute.vhd.
+
+    Formally, these states represent the possible states of the QPixAsic route FSM
+    as described in QpixRoute.vhd.
     """
 
     Idle = 0
@@ -71,17 +81,16 @@ class AsicWord(Enum):
     can receive.
 
     These word types are 4 bits and their values are defined in QPixPkg.vhd
+
+    Formally, these types of words define the possible inputs to the parser
+    which are either sent to the local register (REGREQ) or sent to the remote FIFO
+    which are all other words.
     """
 
     DATA = 1
     REGREQ = 3
     REGRESP = 4
     EVTEND = 5
-
-
-class AsicConnection:
-    def __init__():
-        self = None
 
 
 @dataclass
@@ -118,7 +127,7 @@ class AsicConfig:
 
     # send remote will always force an ASIC to send any remote data it has, from
     # any state
-    SendRemote = False
+    SendRemote = True
 
 
 class QPByte:
@@ -433,13 +442,13 @@ class QPixAsic:
         self.col = col
 
         # timing, absolute and relative with random starting phase
-        self.timeoutStart = 0
         self.config = AsicConfig(AsicDirMask.North, timeout, pTimeout)
         self.transferTicks = transferTicks
         self.transferTime = self.transferTicks * self.tOsc
         self.lastAbsHitTime = [0] * self.nPixels
         self._absTimeNow = 0
         self.relTimeNow = (random.random() - 0.5) * self.tOsc
+        self.timeoutStart = self.relTimeNow
         self._startTime = self.relTimeNow
         self.relTicksNow = 0
 
@@ -503,7 +512,8 @@ class QPixAsic:
         """
         assert isinstance(newState, AsicState), "Incorrect state transition!"
         if newState == AsicState.TransmitRemote and (self.state == AsicState.Finish or self.state == AsicState.Idle):
-            self.timeoutStart = self._absTimeNow
+            if not self.config.SendRemote:
+                self.timeoutStart = self.relTimeNow
         if self.state != newState:
             self.state = newState
             self.state_times.append((self.state, self.relTimeNow, self._absTimeNow))
@@ -530,7 +540,14 @@ class QPixAsic:
         queueItem - tuple of (QPixAsic, AsicDirMask, QPByte, inTime)
 
         The QPByte that's received in this function should simulate the behavior of
-        the logic found in QpixParser.vhd + QpixRoute.vhd
+        the logic found in QpixParser.vhd
+
+        NOTE: Formally, this method is the precbehaves as the FSM's transition
+        function which handles the maping of inputs (the QPByte) and the current
+        ASIC state.
+
+        NOTE: Possible to update ASIC time beyond inTime in the event
+        of a broadcast. it will move time to inTime+transferTime.
         """
         assert isinstance(
             queueItem.dir, AsicDirMask
@@ -561,8 +578,14 @@ class QPixAsic:
         if not self.config.ManRoute:
             self.config.DirMask = AsicDirMask(inDir)
 
-        # is this word relevant to this asic?
+        # currently ALL register requests are broadcast..
         isBroadcast = not inByte.Dest
+        if isBroadcast:
+            outList =  self.Broadcast(queueItem)
+        else:
+            outList = []
+
+        # is this word relevant to this asic?
         toThisAsic = inByte.XDest == self.row and inByte.YDest == self.col
         if toThisAsic or isBroadcast:
 
@@ -590,21 +613,18 @@ class QPixAsic:
                             AsicWord.REGRESP,
                             self.row,
                             self.col,
+                            ReqID = inByte.ReqID,
                             timeStamp = self.CalcTicks(inTime),
                             data=inTime,
                         )
                     )
                 if self._localFifo._curSize > 0 or inCommand == "HardInterrogate":
                     self._changeState(AsicState.TransmitLocal)
-                else:
-                    self._changeState(AsicState.TransmitRemote)
+                # else:
+                #     self._changeState(AsicState.TransmitRemote)
                 self._measuredTime.append(self.relTimeNow)
 
-        # currently ALL register requests are broadcast..
-        if isBroadcast:
-            return self.Broadcast(queueItem)
-        else:
-            return []
+        return outList
 
     def Broadcast(self, queueItem: ProcItem) -> list:
         """
@@ -619,7 +639,8 @@ class QPixAsic:
         outList = []
         for i, connection in enumerate(self.connections):
             if i != inDir and connection:
-                transactionCompleteTime = inTime + inByte.transferTicks * self.tOsc
+                self.transferTime = inByte.transferTicks * self.tOsc
+                transactionCompleteTime = inTime + self.transferTime
                 sendT = self.UpdateTime(transactionCompleteTime, i, isTx=True)
                 outList.append(
                     (
@@ -781,34 +802,37 @@ class QPixAsic:
         if self.isDaqNode or self._absTimeNow >= targetTime:
             return []
 
-        # if the ASIC is in a push state, check for any new hits, if so start sending them
-        if self.config.EnablePush and self._ReadHits(targetTime) > 0:
-            self._changeState(AsicState.TransmitLocal)
-
-        if self.config.SendRemote and self._remoteFifo._curSize > 0:
-            self._changeState(AsicState.TransmitRemoteFull)
 
         ## QPixRoute State machine ##
         if self.state == AsicState.Idle:
-            return self._processMeasuringState(targetTime)
 
-        elif self.state == AsicState.TransmitLocal:
+            # if the ASIC is in a push state, check for any new hits, if so
+            # start sending them
+            if self.config.EnablePush and self._ReadHits(targetTime) > 0:
+                self._changeState(AsicState.TransmitLocal)
+
+            elif self.config.SendRemote and self._remoteFifo._curSize > 0:
+                self._changeState(AsicState.TransmitRemoteFull)
+
+            else:
+                return self._processMeasuringState(targetTime)
+
+        if self.state == AsicState.TransmitLocal:
             return self._processTransmitLocalState(targetTime)
 
-        elif self.state == AsicState.Finish:
+        if self.state == AsicState.Finish:
             return self._processFinishState(targetTime)
 
-        elif self.state == AsicState.TransmitRemote or self.state == AsicState.TransmitRemoteFull:
+        if self.state == AsicState.TransmitRemote or self.state == AsicState.TransmitRemoteFull:
             return self._processTransmitRemoteState(targetTime)
 
-        elif self.state == AsicState.TransmitReg:
+        if self.state == AsicState.TransmitReg:
             return self._processRegisterResponse(targetTime)
 
-        else:
-            # undefined state
-            print("WARNING! ASIC in undefined state")
-            self._changeState(AsicState.Idle)
-            return []
+        # undefined state
+        print("WARNING! ASIC in undefined state")
+        self._changeState(AsicState.Idle)
+        return []
 
     def _processMeasuringState(self, targetTime):
         """
@@ -826,10 +850,11 @@ class QPixAsic:
         the IDLE/measuring state.
 
         NOTE: this state is ONLY entered from the IDLE state, where during the IDLE
-        state, if remoteFifo is NOT empty and the CURRENT word is not a
+        state, if remoteFifo is NOT empty and the received word is a RegReq.
         """
         respByte = self._remoteFifo.Read()
-        transactionCompleteTime = self._absTimeNow + self.tOsc * respByte.transferTicks
+        self.transferTime = self.tOsc * respByte.transferTicks
+        transactionCompleteTime = self._absTimeNow + self.transferTime
         sendT = self.UpdateTime(transactionCompleteTime, self.config.DirMask.value, isTx=True)
         self._changeState(AsicState.Idle)
         return [(
@@ -848,7 +873,8 @@ class QPixAsic:
         localTransfers = []
         while self._absTimeNow < targetTime and self._localFifo._curSize > 0:
             hit = self._localFifo.Read()
-            transactionCompleteTime = self._absTimeNow + self.tOsc * hit.transferTicks
+            self.transferTime = self.tOsc * hit.transferTicks
+            transactionCompleteTime = self._absTimeNow + self.transferTime
             i = self.config.DirMask.value
             sendT = self.UpdateTime(transactionCompleteTime, i, isTx=True)
             localTransfers.append((
@@ -857,7 +883,6 @@ class QPixAsic:
                     hit,
                     sendT,
                 ))
-            # transactionCompleteTime = self._absTimeNow + self.transferTime
         if self._localFifo._curSize == 0:
             self._changeState(AsicState.Finish)
         return localTransfers
@@ -869,7 +894,8 @@ class QPixAsic:
         """
         # send the finish packet word
         finishByte = QPByte(AsicWord.EVTEND, self.row, self.col, self._intTick, ReqID=self._intID)
-        transactionCompleteTime = self._absTimeNow + self.tOsc * finishByte.transferTicks
+        self.transferTime = self.tOsc * finishByte.transferTicks
+        transactionCompleteTime = self._absTimeNow + self.transferTime
         sendT = self.UpdateTime(transactionCompleteTime, self.config.DirMask.value, isTx=True)
 
         # after sending the word we go to the Transmit remote state
@@ -890,11 +916,13 @@ class QPixAsic:
 
         # If we're timed out, just kill it
         if self.timeout():
+            self.UpdateTime(targetTime)
             self._changeState(AsicState.Idle)
             return []
 
         # If there's nothing to forward, bring us up to requested time
         if self._remoteFifo._curSize == 0:
+            # transition to idle first, if timeout happens before targetTime
             if targetTime > self.timeoutStart + self.config.timeout * self.tOsc:
                 self.UpdateTime(self.timeoutStart + self.config.timeout * self.tOsc)
                 self._changeState(AsicState.Idle)
@@ -927,12 +955,13 @@ class QPixAsic:
         Function describes whether or not the ASIC has timed out.
 
         This is the control logic for when an ASIC should leave the
-        TransmitRemote state.
+        TransmitRemote state. If SendRemote is enabled, leave when empty.
+        Otherwise, leave after time defined by  self.config.timeout.
         """
         if self.config.SendRemote == True:
             return self._remoteFifo._curSize == 0
         else:
-            return bool(self._absTimeNow - self.timeoutStart > self.config.timeout * self.tOsc)
+            return bool(self.relTimeNow - self.timeoutStart > self.config.timeout * self.tOsc)
 
     def CalcTicks(self, absTime):
         """
@@ -961,7 +990,12 @@ class QPixAsic:
         transT = absTime
         if dir is not None:
             assert isTx is not None, "must select Tx or Rx when updating connection"
-            # if Tx send at the earliest convenient time
+
+            # the connection has a transfertime which depends on this particular
+            # QPByte, and therefore must be updated
+            self.connections[dir].transTime = self.transferTime
+
+            # if Tx is busy send at the next time interval
             if isTx and self.connections[dir].send(absTime):
                 transT = self.connections[dir].txBusy + self.transferTime + self.tOsc
                 if self.connections[dir].send(transT):
@@ -980,6 +1014,14 @@ class QPixAsic:
         return transT
 
     class AsicConnections():
+        """
+        This class stores the edges for the each ASIC and creates pointers to
+        connected ASICs within an array
+
+        It stores its connections which flag during which times the connection
+        is busy, and should prevent multiple writes along a path at the same
+        time.
+        """
 
         def __init__(self, tt):
             self.connections = [self.connection(i, tt) for i in range(4)]
@@ -1005,8 +1047,10 @@ class QPixAsic:
             dir: int
             transTime: float
             asic = None
-            txBusy = False
-            rxBusy = False
+
+            # time values to hold when a Tx and Rx line are busy
+            txBusy = -1
+            rxBusy = -1
 
             def __repr__(self):
                 if self.asic is not None:
@@ -1024,7 +1068,6 @@ class QPixAsic:
                 """
                 if self.txBusy > T - self.transTime:
                     if self.asic is not None:
-                        # print(f"WARNING sending to ({self.asic.row},{self.asic.col}) on busy connection")
                         return True
                     else:
                         print("WARNING sending on busy none asic")
@@ -1216,6 +1259,9 @@ class DaqNode(QPixAsic):
             self._reqWords = 0
             self._respWords = 0
 
+            # easy access for calibration TODO refactor
+            self.evtWords = []
+
         def Write(self, data:DaqData) -> int:
             if not isinstance(data, DaqData):
                 raise QPException(f"Can not add this data-type to the DaqNode local FIFO! {type(data)}")
@@ -1228,6 +1274,7 @@ class DaqNode(QPixAsic):
                 self._dataWords += 1
             elif data.wordType == AsicWord.EVTEND:
                 self._endWords += 1
+                self.evtWords.append((data.row, data.col, data.daqT, data.qbyte.timeStamp))
             elif data.wordType == AsicWord.REGREQ:
                 self._reqWords += 1
             elif data.wordType == AsicWord.REGRESP:

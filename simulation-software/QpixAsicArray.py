@@ -330,7 +330,7 @@ class QpixAsicArray():
 
          # Make the array and connections
         self._asics = self._makeArray(timeout=timeout, randomRate=hitsPerSec)
-        self._daqNode = DaqNode(fOsc = self.fNominal, nPixels = 0, debugLevel=self._debugLevel, timeout=timeout, randomRate=hitsPerSec)
+        self._daqNode = DaqNode(fOsc=self.fNominal, nPixels=0, debugLevel=self._debugLevel, timeout=timeout, randomRate=hitsPerSec)
 
         self._asics[0][0].connections[AsicDirMask.West.value].asic = self._daqNode
 
@@ -544,7 +544,10 @@ class QpixAsicArray():
 
                 p1 = self._ProcessArray(hitTime-self._timeEpsilon)
 
-                # ASIC to receive data
+                # daq node ASIC to receive evt end word 
+                if asic.isDaqNode and nextItem.QPByte.wordType == AsicWord.EVTEND:
+                    print("daq recv")
+
                 newProcessItems = asic.ReceiveByte(nextItem)
                 if newProcessItems:
                     for item in newProcessItems:
