@@ -141,30 +141,37 @@ def viewAsicState(qparray, time_begin=-100e-9, time_end=300e-6, ordering="Normal
 
     # unpack the data into arrays of states and times
     states = [[] for i in range(len(asics))]
-    relTimes = [[] for i in range(len(asics))]
+    absTimes = [[] for i in range(len(asics))]
     for i, asic in enumerate(asics):
-        for (state, _, relTime) in asic.state_times:
+        for (state, _, absTime) in asic.state_times:
             states[i].append(state)
-            relTimes[i].append(relTime)
+            absTimes[i].append(absTime)
 
     # make the graph 
-    fig, ax = plt.subplots(figsize=(15, 0.2*(qparray._ncols * qparray._nrows)))
+    # fig, ax = plt.subplots(figsize=(15, 0.2*(qparray._ncols * qparray._nrows)))
+    fig, ax = plt.subplots(figsize=(15, 10))
     ax.set_ylim(0.5, len(asics)+3)
 
     # repack the data into a viewable format for barh
     i = 1
-    for asic_states, asic_relTimes in zip(states[:], relTimes[:]):
+    for asic_states, asic_relTimes in zip(states[:], absTimes[:]):
         asic_state_widths = []
         state_colors = []
         cur_state = asic_states[0]
         cur_time = asic_relTimes[0]
-        for state, time in zip(asic_states, asic_relTimes):
-            # we've moved to a new state at this time
-            if state != cur_state:
-                asic_state_widths.append((cur_time, time-cur_time))
-                state_colors.append(color_mapping[cur_state])
-                cur_state = state
-                cur_time = time
+        for state, time in list(zip(asic_states, asic_relTimes))[1:]:
+            asic_state_widths.append([cur_time, time-cur_time])
+            state_colors.append(color_mapping[cur_state])
+            cur_state = state
+            cur_time = time
+        # make sure we extend the final state to the end of the graph
+        if len(asic_state_widths) < 1:
+            asic_state_widths.append([cur_time, time_end])
+            state_colors.append(color_mapping[cur_state])
+        if asic_state_widths[-1][1] < time_end:
+            asic_state_widths.append([asic_state_widths[-1][0], time_end - asic_state_widths[-1][0]])
+            state_colors.append(color_mapping[cur_state])
+            print("updating state:", cur_state)
         ax.broken_barh(asic_state_widths, (i, 0.50),
                         facecolors=state_colors)
         i += 1
