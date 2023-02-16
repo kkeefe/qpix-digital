@@ -169,9 +169,8 @@ def viewAsicState(qparray, time_begin=-100e-9, time_end=300e-6, ordering="Normal
             asic_state_widths.append([cur_time, time_end])
             state_colors.append(color_mapping[cur_state])
         if asic_state_widths[-1][1] < time_end:
-            asic_state_widths.append([asic_state_widths[-1][0], time_end - asic_state_widths[-1][0]])
+            asic_state_widths.append([cur_time, time_end - cur_time])
             state_colors.append(color_mapping[cur_state])
-            print("updating state:", cur_state)
         ax.broken_barh(asic_state_widths, (i, 0.50),
                         facecolors=state_colors)
         i += 1
