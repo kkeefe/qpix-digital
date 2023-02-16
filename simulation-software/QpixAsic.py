@@ -1,6 +1,5 @@
 #!/usr/bin/python3
 
-import random
 import math
 import time
 from enum import Enum
@@ -447,7 +446,7 @@ class QPixAsic:
         self.transferTime = self.transferTicks * self.tOsc
         self.lastAbsHitTime = [0] * self.nPixels
         self._absTimeNow = 0
-        self.relTimeNow = (random.random() - 0.5) * self.tOsc
+        self.relTimeNow = (np.random.uniform() - 0.5) * self.tOsc
         self.timeoutStart = self.relTimeNow
         self._startTime = self.relTimeNow
         self.relTicksNow = 0
@@ -682,7 +681,7 @@ class QPixAsic:
             while currentTime < targetTime:
 
                 # generate a posion distribution of absolute / reletive times
-                p = random.random()  # prints random real between 0 and 1
+                p = np.random.uniform()  # prints random real between 0 and 1
                 nextAbsHitTime = currentTime + (
                     -math.log(1.0 - p) / self.randomRate
                 )  # math.log is the natural log
@@ -1256,7 +1255,7 @@ class DaqNode(QPixAsic):
         Helper function which issues a register request to a single ASIC-node.
         """
         byte = QPByte(AsicWord.REGREQ, None, None, Dest=1, XDest=row, YDest=col,
-                      ReqID=ReqID, OpWrite=True, config=config)
+                      ReqID=self._reqID, OpWrite=True, config=config)
         self._reqID += 1
         return byte
 

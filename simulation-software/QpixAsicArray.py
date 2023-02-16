@@ -305,9 +305,10 @@ class QpixAsicArray():
       tiledf      - tuple of asic hits to load into the array, tile dataframe is created from radiogenicNB
       RouteState  - string or None type member to define current routing method of Array
       push_state  - enable flag that is sent to ASICs within the array enabling push
+      seed        - seed value to send to random module
     """
     def __init__(self, nrows, ncols, nPixs=16, fNominal=30e6, pctSpread=0.05, deltaT=1e-5, timeEpsilon=1e-6,
-                timeout=1.5e4, hitsPerSec = 20./1., debug=0.0, tiledf=None):
+                 timeout=1.5e4, hitsPerSec = 20./1., debug=0.0, tiledf=None, seed=2):
 
         # if we have a tiledf to construct an array, then the size is determined by the tile
         if tiledf is not None:
@@ -327,6 +328,10 @@ class QpixAsicArray():
         self.RouteState = None
         self.push_state = False
         self.send_remote = False
+
+        # keep track of which seed was used for this array
+        self._seed = seed
+        random.seed(seed)
 
         # the array also manages all of the processing queue times to use
         self._queue = ProcQueue()
@@ -484,7 +489,7 @@ class QpixAsicArray():
         if byte is None:
             request = self._daqNode.GetTimestamp()
         # the only kinds of bytes that go this else through here are register writes
-        elif byte.WordType == AsicWord.REGREQ:
+        elif byte.wordType == AsicWord.REGREQ:
             request = byte
         else:
             raise QPExcpetion("Unknown word type being sent via command")
