@@ -36,7 +36,6 @@ entity QpixComm is
       rst            : in std_logic;
 
       EndeavorScale  : in std_logic_vector(2 downto 0);
-      qpixConf       : in QpixConfigType;
       fifoFull       : in std_logic;
 
       -- external ASIC ports
@@ -56,7 +55,6 @@ entity QpixComm is
 
       -- register from  QpixRegFile
       qpixConf       : in QpixConfigType;
-
 
       -- register information to QpixRegFile
       regData        : out QpixRegDataType;
@@ -204,11 +202,13 @@ begin
       qpixConf          => qpixConf,
       fifoFull          => fifoFull,
 
+      -- Rx connections from Phys Layer
       inBytesArr        => RxByteArr,
       inBytesValid      => RxBytesValid,
       inBytesAck        => RxBytesAck,
       inData            => inData,
-                        
+
+      -- Tx connections to Phys Layer
       outData           => outData_i,
       outBytesArr       => TxByteArr,
       outBytesValidArr  => TxByteValidArr,

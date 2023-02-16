@@ -1,4 +1,4 @@
-----------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
 -- QPix data parser
 ----------------------------------------------------------------------------------
 library ieee;
@@ -13,8 +13,6 @@ entity QpixParser is
    port (
       clk                 : in std_logic;
       rst                 : in std_logic;
-
-      qpixConf            : in QpixConfigType;
       fifoFull            : in std_logic;
       
       -- input data from ASICs / output data to route
