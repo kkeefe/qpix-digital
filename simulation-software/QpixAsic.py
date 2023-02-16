@@ -452,8 +452,10 @@ class QPixAsic:
         self._startTime = self.relTimeNow
         self.relTicksNow = 0
 
+        # state tracking variables
         self.state = AsicState.Idle
         self.state_times = [(self.state, self.relTimeNow, self._absTimeNow)]
+        self._broadT = []
 
         # daq node Configuration
         self.isDaqNode = isDaqNode
@@ -642,6 +644,7 @@ class QPixAsic:
                 self.transferTime = inByte.transferTicks * self.tOsc
                 transactionCompleteTime = inTime + self.transferTime
                 sendT = self.UpdateTime(transactionCompleteTime, i, isTx=True)
+                self._broadT.append(sendT)
                 outList.append(
                     (
                         connection.asic,
@@ -812,7 +815,7 @@ class QPixAsic:
                 self._changeState(AsicState.TransmitLocal)
 
             elif self.config.SendRemote and self._remoteFifo._curSize > 0:
-                self._changeState(AsicState.TransmitRemoteFull)
+                self._changeState(AsicState.TransmitRemote)
 
             else:
                 return self._processMeasuringState(targetTime)
@@ -823,7 +826,7 @@ class QPixAsic:
         if self.state == AsicState.Finish:
             return self._processFinishState(targetTime)
 
-        if self.state == AsicState.TransmitRemote or self.state == AsicState.TransmitRemoteFull:
+        if self.state in (AsicState.TransmitRemote, AsicState.TransmitRemoteFull):
             return self._processTransmitRemoteState(targetTime)
 
         if self.state == AsicState.TransmitReg:
@@ -891,6 +894,10 @@ class QPixAsic:
         """
         Finish state based on QpixRoute.vhd state. Should pack a single word into
         the event fifo, send it, and proceed to the transmit remote state.
+
+        NOTE: the timing only works in this state since the it's guarunteed
+        to be entered form transmitLocal state and to leave after a single
+        transaction.
         """
         # send the finish packet word
         finishByte = QPByte(AsicWord.EVTEND, self.row, self.col, self._intTick, ReqID=self._intID)
@@ -914,10 +921,10 @@ class QPixAsic:
         bring the asic back to the idle state after a timeout
         """
 
-        # If we're timed out, just kill it
+        # If we're timed out, immediately go to IDLE and then update time
         if self.timeout():
-            self.UpdateTime(targetTime)
             self._changeState(AsicState.Idle)
+            self.UpdateTime(targetTime)
             return []
 
         # If there's nothing to forward, bring us up to requested time
@@ -926,29 +933,45 @@ class QPixAsic:
             if targetTime > self.timeoutStart + self.config.timeout * self.tOsc:
                 self.UpdateTime(self.timeoutStart + self.config.timeout * self.tOsc)
                 self._changeState(AsicState.Idle)
+                if self.config.SendRemote:
+                    raise QPException("should not enter this block during sendremote")
             else:
                 self.UpdateTime(targetTime)
             return []
 
-        else:
-            hitlist = []
-            transactionCompleteTime = self._absTimeNow + self.transferTime
-            self._changeState(AsicState.TransmitRemoteFull)
 
-            # while transactionCompleteTime < targetTime and self._remoteFifo._curSize > 0 and not self.timeout():
-            while self._remoteFifo._curSize > 0 and not self.timeout():
-                hit = self._remoteFifo.Read()
-                i = self.config.DirMask.value
-                sendT = self.UpdateTime(transactionCompleteTime, i, isTx=True)
-                hitlist.append((
-                        self.connections[i].asic,
-                        AsicDirMask((i + 2) % 4),
-                        hit,
-                        sendT,
-                    ))
-                transactionCompleteTime = self._absTimeNow + self.transferTime
+        # here we process hits from the non-empty remote fifo.
+        # This block should ensure that hits are sent up until
+        # this ASICs time reaches targetTime, or until the remote
+        # FIFO is empty, and the FIFO has not timed out
+        hitlist = []
+        self._changeState(AsicState.TransmitRemoteFull)
+        while (
+                self._remoteFifo._curSize > 0 and
+                not self.timeout() and
+                self._absTimeNow < targetTime
+        ):
+
+            hit = self._remoteFifo.Read()
+            self.transferTime = hit.transferTicks * self.tOsc
+            transactionCompleteTime = self._absTimeNow + self.transferTime
+            i = self.config.DirMask.value
+            sendT = self.UpdateTime(transactionCompleteTime, i, isTx=True)
+            hitlist.append((
+                    self.connections[i].asic,
+                    AsicDirMask((i + 2) % 4),
+                    hit,
+                    sendT,
+                ))
+        # here we need to check why we left the while loop.
+        # If we've timedout for any reason, we're back to IDLE
+        # otherwise we continue on in the Transmit remote state
+        if self.timeout():
+            self._changeState(AsicState.Idle)
+        else:
             self._changeState(AsicState.TransmitRemote)
-            return hitlist
+
+        return hitlist
 
     def timeout(self):
         """
@@ -1007,8 +1030,8 @@ class QPixAsic:
         if absTime > self._absTimeNow:
 
             # update the absolute time and relative times / ticks
-            self._absTimeNow = absTime
-            self.relTicksNow = self.CalcTicks(absTime)
+            self._absTimeNow = transT if transT > absTime else absTime
+            self.relTicksNow = self.CalcTicks(self._absTimeNow)
             self.relTimeNow = self.relTicksNow * self.tOsc + self._startTime
 
         return transT

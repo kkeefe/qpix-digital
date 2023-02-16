@@ -135,8 +135,9 @@ def test_asic_receiveByte(qpix_array, tProcRegReq):
     assert tAsic.state == AsicState.Idle, "should begin in idle state"
     b = tAsic.ReceiveByte(tProcRegReq)
     # _ = tAsic.Process(tAsic._absTimeNow)
-    assert len(b) == 2, f"{len(b)}, should create two transactions"
-    assert tAsic.state == AsicState.TransmitRemote, "should transmit remote after receiving byte from DAQ node"
+    assert len(b) == 2, f"{len(b)}, should create two transactions at base-node during interrogation"
+    assert tAsic.state == AsicState.Idle, f"{tAsic.state} not in idle after recv @ time {tAsic.relTimeNow}"
+    assert tAsic.relTimeNow != tAsic._startTime, f"ASIC did not move forward time during broadcast."
 
 def test_asic_injectHits(qpix_array, tRegReqByte):
     """
@@ -725,57 +726,33 @@ if __name__ == "__main__":
                 timeEpsilon=timeEpsilon, timeout=timeout,
                 hitsPerSec=hitsPerSec, debug=debug, tiledf=tiledf)
 
-    rows, cols = qpix_array._nrows, qpix_array._ncols
-    r = "Snake"
-    qpix_array.Route(r, transact=False)
 
-    qpix_hits = []
-    for asic in qpix_array:
-        nHits = np.random.randint(13)
-        qpix_hits.append(np.random.uniform(1e-8, MAX_TIME, nHits))
+    tAsic = qpix_array[0][0]
+    tRegReqByte = QpixAsic.QPByte(AsicWord.REGREQ, None, None, ReqID=2)
+    tProcRegReq = QpixAsic.ProcItem(tAsic, 1e-3, tRegReqByte, 0)
+    tProcRegReq.dir = QpixAsic.AsicDirMask.West
 
-    nHits, maxTime = 0, 0
-    for hit, asic in zip(qpix_hits, qpix_array):
-        if len(hit) > 0:
-            hit = sorted(hit)
-            maxTime = np.max(hit) if maxTime < np.max(hit) else maxTime
-            asic.InjectHits(hit)
-            nHits += len(hit)
-        print(f"Asic: ({asic.row},{asic.col}) hits: {hit}")
+    route = "Left"
+    qpa = qpix_array
+    qpa.Route(route, transact=False)
+    r, c = qpa._nrows, qpa._ncols
 
-    # run the interrogate procedure
-    qpix_array = run_array_interrogate(qpix_array, maxTime, 0.5)
+    hitTimes = [1e-10, 1e-9]
+    qpa[r-1][c-1].InjectHits(hitTimes)
 
-    # compare fifos with expected input hits
-    good_hits = ensure_hits(qpix_hits, qpix_array)
+    dT = 0.0010
+    for i in range(r+c):
+        qpa.Interrogate(dT)
 
-    # snake means every ASIC is connected in a long line and should see every # other ASIC
-    if rows%2 == 0:
-        cur_asic = qpix_array[rows-1][0]
-    else:
-        cur_asic = qpix_array[rows-1][cols-1]
+    for a in qpa:
+        if len(a.state_times) > 2:
+            print(f"({a.row},{a.col}) state: {a.state_times[-1][0]}, @ {a.state_times[-1][2]}")
 
-    asicCnt, transactions = 1, 0
-    while asicCnt < rows*cols:
-
-        next_asic = cur_asic.connections[cur_asic.config.DirMask.value].asic
-        if next_asic.isDaqNode:
-            break
-
-        # Count the number of remote transactions this ASIC sent to its neighbor
-        for (state, _, _) in cur_asic.state_times:
-            if state == AsicState.Finish:
-                transactions += 1
-        transactions -= cur_asic._remoteFifo._curSize
-        transactions += (cur_asic._localFifo._totalWrites - cur_asic._localFifo._curSize)
-
-        remote_writes = next_asic._remoteFifo._totalWrites
-        msg = f"snake trans. cnt error @ ({next_asic.row},{next_asic.col}) {transactions}/{remote_writes}"
-        assert remote_writes == transactions, msg
-
-        asicCnt += 1
-        cur_asic = next_asic
-
-    assert asicCnt == rows*cols, f"didnt count all ASICs. cnt: {asicCnt} != size: {rows*cols}"
+    nTicks = qpa[0][0].transferTicks
+    T = qpa[0][0].tOsc 
+    pT = nTicks * T * (r + c)
+    end = dT+pT*20
+    print("end time:", end, ", timeout length:", nTicks*T)
+    # qparray.viewAsicState(qpa, time_end=end*0.125, ordering="left")
 
     input("test")

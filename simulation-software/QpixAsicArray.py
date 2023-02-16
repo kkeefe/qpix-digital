@@ -132,7 +132,7 @@ def viewAsicState(qparray, time_begin=-100e-9, time_end=300e-6, ordering="Normal
                     asics.append(qparray[i][j])
                 else:
                     asics.append(qparray[i][(qparray._ncols - 1) - j])
-    # attempt to order in the perceived shorted broadcast distance
+    # attempt to order in the perceived shortest broadcast distance
     else:
         r, c = qparray._nrows, qparray._ncols
         for i in range(r+c):
@@ -551,10 +551,6 @@ class QpixAsicArray():
 
                 p1 = self._ProcessArray(hitTime-self._timeEpsilon)
 
-                # daq node ASIC to receive evt end word 
-                if asic.isDaqNode and nextItem.QPByte.wordType == AsicWord.EVTEND:
-                    print("daq recv")
-
                 newProcessItems = asic.ReceiveByte(nextItem)
                 if newProcessItems:
                     for item in newProcessItems:
@@ -565,24 +561,20 @@ class QpixAsicArray():
 
                 # Speed up logic! What kinds of ASIC configuration can generate a 
                 # byte transfer via processing only
-                if self._queue._entries == 0:
+                if self._queue.Length() == 0:
                     if self.push_state == True:
-                        self._procAsics = [asic for asic in self if len(asic._times) > 0]
+                        self._procAsics = [asic for asic in self if len(asic._times) != 0]
                     else:
                         self._procAsics = [asic for asic in self if (
-                                    asic.state == AsicState.Finish or
-                                    asic.state == AsicState.TransmitLocal or 
-                                    (asic._remoteFifo._curSize > 0 and 
-                                        (asic.state == AsicState.TransmitRemote or 
-                                        asic.state == AsicState.TransmitRemoteFull or
-                                        asic.config.SendRemote == True
-                                        )))
-                                ] 
+                                    asic.state != AsicState.Idle or
+                                    (asic._remoteFifo._curSize > 0 and
+                                        (asic.state == AsicState.TransmitRemote or
+                                         asic.state == AsicState.TransmitRemoteFull or
+                                         asic.config.SendRemote == True)
+                                     ))]
 
-            self._timeNow = self[0][0]._absTimeNow if self._timeNow < self[0][0]._absTimeNow else self._timeNow + self._deltaT
+            self._timeNow += self._deltaT
             self._tickNow = int(self._timeNow * self.fNominal) + 1
-            self._daqNode.relTimeNow = self._timeNow
-            self._daqNode.relTicksNow = self._tickNow
 
         return
 
