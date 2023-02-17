@@ -734,10 +734,6 @@ class QPixAsic:
             return
 
         # place all of the injected times and channels into self._times and self._channels
-        # times = times.round(decimals=14)
-        # for ind, j in enumerate(times):
-        #   if j in self._times:
-        #     times[ind]+=self.tOsc
         if not isinstance(self._times, list):
             self._times = list(self._times)
         self._times.extend(times)
@@ -745,20 +741,42 @@ class QPixAsic:
         # include default channels
         if channels is None:
             channels = [[1, 3, 8]] * len(times)
-        assert len(channels) == len(
-            times
-        ), "Injected Times and Channels must be same length"
+
+        msg =  "Injected Times and Channels must be same length"
+        assert len(channels) == len(times), msg
+
         if not isinstance(self._channels, list):
             self._channels = list(self._channels)
         self._channels.extend(channels)
 
-        # sort the times and channels
-        # zip outputs tuples, so turn times and channels if more hits injected
+        # sort the times and channels, which allow O(1) access for read during push
         times, channels = zip(*sorted(zip(self._times, self._channels)))
 
-        # construct the channel byte here, once
-        self._channels = np.array([np.sum([0x1 << ch for ch in c]) for c in channels])
+        # construct the channel byte here in one pass
+        # else condition handles output of pyNotebooks
+        if isinstance(channels[0], list):
+            self._channels = np.array([np.sum([0x1 << ch for ch in c]) for c in channels])
+        else:
+            channels = [0x1 << c for c in channels]
+
+            # we want to make sure that we combine hits of multiple channels
+            # that would happen within one clock cycle
+            combineIndex = []
+            goodIndex = 0
+            for i in range(len(times)-1):
+                if times[i+1] - times[goodIndex] < self.tOsc:
+                    combineIndex.append(i+1)
+                else:
+                    goodIndex = i+1
+
+            for k in reversed(combineIndex):
+                times.pop(k)
+                channels[k-1] |= channels.pop(k)
+
+            self._channels = np.array(channels)
+
         self._times = np.array(times)
+
 
     def _ReadHits(self, targetTime):
         """
@@ -990,7 +1008,12 @@ class QPixAsic:
         Calculate the number of transfer ticks beginning from self._starttime
         until abstime. This is used to calculate an accurate timestamp 
         for an arbitrary read call
+
+        NOTE: _startTime is defined as some random starting phase within one
+        clock cycle of zero at the beginning of the simulation, defined by
+        np.random.uniform, or the np.random seed.
         """
+
         tdiff = absTime - self._startTime
         cycles = int(tdiff / self.tOsc) + 1
         return cycles
@@ -1029,7 +1052,7 @@ class QPixAsic:
         if absTime > self._absTimeNow:
 
             # update the absolute time and relative times / ticks
-            self._absTimeNow = transT if transT > absTime else absTime
+            self._absTimeNow = transT
             self.relTicksNow = self.CalcTicks(self._absTimeNow)
             self.relTimeNow = self.relTicksNow * self.tOsc + self._startTime
 

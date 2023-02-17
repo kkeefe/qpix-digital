@@ -176,7 +176,8 @@ def viewAsicState(qparray, time_begin=-100e-9, time_end=300e-6, ordering="Normal
         i += 1
 
     ax.grid(True)
-    ax.set_yticks([i+1.15 for i in range(len(asics))], labels=[f"({asic.row}, {asic.col})" for asic in asics])
+    df = qparray._daqNode.fOsc
+    ax.set_yticks([i+1.15 for i in range(len(asics))], labels=[f"{asic.fOsc/df:.2f}({asic.row}, {asic.col})" for asic in asics])
     ax.set_xlim(time_begin, time_end)
     plt.tight_layout()
 
@@ -287,6 +288,33 @@ def PrintTransactMap(qparray, silent=False):
 
     return dMap
 
+def AnalyzeASIC(qparray, row, col):
+    """
+    This function should perform a full analysis for a specific ASIC within a qparray.
+
+    This means that the DAQ node is expected to be full of data. if not, this will return None,
+    indicating a failure.
+
+    It should be able to reconstruct an expected frequency from event words within the DAQ
+    """
+    daqNode = qparray._daqNode
+    assert daqNode._localFifo._curSize > 0, "no data in the DAQ Node!"
+    recv, injected =  daqNode._localFifo._dataWords, qparray.totalInjectedHits
+    msg = f"missing injected data recv {recv} != injected {injected}"
+    assert recv == injected, msg
+
+    # immediately get a list of all of the data within the DAQNode, and filter
+    # for the specific ASIC we want
+
+    fifoData = daqNode._localFifo._data
+    asicData = [d for d in fifoData if d.row==row and d.col == col and d.wordType==AsicWord.DATA]
+    asicEnd = [d for d in fifoData if d.row==row and d.col == col and d.wordType==AsicWord.EVTEND]
+
+    print(f"passed array, found {len(asicData)} hits for ASIC ({row},{col})")
+    print(f"passed array, found {len(asicEnd)} end words for ASIC ({row},{col})")
+
+    return asicData
+
 ## end helper functions
 
 class QpixAsicArray():
@@ -346,6 +374,8 @@ class QpixAsicArray():
         self._asics[0][0].connections[AsicDirMask.West.value].asic = self._daqNode
 
         self._alert = 0
+        self.totalInjectedHits = 0
+        self.totalTimes = 0
 
         # load in hits if we're creating an array based on tiledf data
         if tiledf is not None:
@@ -689,12 +719,24 @@ class QpixAsicArray():
 
         This function should be
         ARGS:
-            dataframeHits : tuple which stores (asicX :int, asicY :int, times :list)
+            dataframeHits - tuple of:
+                    asicX  :int
+                    asicY  :int
+                    resets :list (time, channel)
         """
         # store the asic times into the correct asic
-        for asicX, asicY, times in dataframeHits:
-            times = np.asarray(times)
-            self._asics[asicX][asicY].InjectHits(times)
+        for asicX, asicY, resets in dataframeHits:
+            times = np.asarray([time for time, _ in resets])
+            channels = np.asarray([int(channel) for _, channel in resets])
+            self._asics[asicX][asicY].InjectHits(times, channels)
+
+            # the total injected is equal to the final amount of times
+            # stored in the asic after injection.
+            # this allows the InjectHits method of the ASIC
+            # to combine 'near' times that would otherwise be recorded
+            # on the time timestamp/clock
+            self.totalInjectedHits += len(self._asics[asicX][asicY]._times)
+            self.totalTimes += len(times)
 
 
 

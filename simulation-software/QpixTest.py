@@ -720,39 +720,76 @@ def test_asic_tick_cnt(qpix_array):
 
 if __name__ == "__main__":
 
-    qpix_array = QpixAsicArray.QpixAsicArray(
-                nrows=tRows, ncols=tCols, nPixs=nPix,
-                fNominal=fNominal, pctSpread=pctSpread, deltaT=deltaT,
-                timeEpsilon=timeEpsilon, timeout=timeout,
-                hitsPerSec=hitsPerSec, debug=debug, tiledf=tiledf)
+    # qpix_array = QpixAsicArray.QpixAsicArray(
+    #             nrows=tRows, ncols=tCols, nPixs=nPix,
+    #             fNominal=fNominal, pctSpread=pctSpread, deltaT=deltaT,
+    #             timeEpsilon=timeEpsilon, timeout=timeout,
+    #             hitsPerSec=hitsPerSec, debug=debug, tiledf=tiledf)
 
+    import matplotlib.pyplot as plt
+    rows = 2
+    cols = 2
+    nHits = 10
+    maxTime = 1 # time to idle for
 
-    tAsic = qpix_array[0][0]
-    tRegReqByte = QpixAsic.QPByte(AsicWord.REGREQ, None, None, ReqID=2)
-    tProcRegReq = QpixAsic.ProcItem(tAsic, 1e-3, tRegReqByte, 0)
-    tProcRegReq.dir = QpixAsic.AsicDirMask.West
+    # make nHits for each asic
+    asicX = sorted([i for i in range(rows)]*cols)
+    asicY = [i for i in range(cols)]*rows
+    asicHits = [sorted(list(np.random.rand(nHits) * maxTime)) for i in range(rows*cols)]
 
-    route = "Left"
-    qpa = qpix_array
-    qpa.Route(route, transact=False)
-    r, c = qpa._nrows, qpa._ncols
+    # make some 'fake' df hits to read in
+    testDF = {}
+    testDF["nrows"] = rows
+    testDF["ncols"] = cols
+    testDF["hits"] = tuple(zip(asicX, asicY, asicHits))
 
-    hitTimes = [1e-10, 1e-9]
-    qpa[r-1][c-1].InjectHits(hitTimes)
+    testingArrays = []
+    qpa = QpixAsicArray.QpixAsicArray(rows, cols, tiledf=testDF, debug=0)
+    qpa.Route(route="snake", timeout=15e3, transact=False)
+    qpa.SetPushState(enabled=True, transact=False)
+    testingArrays.append(qpa)
 
-    dT = 0.0010
-    for i in range(r+c):
-        qpa.Interrogate(dT)
+    fig, axs = plt.subplots(len(testingArrays),3, figsize=(17.5,5*len(testingArrays)))
 
-    for a in qpa:
-        if len(a.state_times) > 2:
-            print(f"({a.row},{a.col}) state: {a.state_times[-1][0]}, @ {a.state_times[-1][2]}")
+    for ti, tile in enumerate(testingArrays):
 
-    nTicks = qpa[0][0].transferTicks
-    T = qpa[0][0].tOsc 
-    pT = nTicks * T * (r + c)
-    end = dT+pT*20
-    print("end time:", end, ", timeout length:", nTicks*T)
-    # qparray.viewAsicState(qpa, time_end=end*0.125, ordering="left")
+        # go for 10ms after max time to ensure all of the events make it to the daqNode
+        tile.IdleFor(maxTime + 1)
+
+        transactData = PrintTransactMap(tile, silent=True)
+
+        # # build up 2d array of transactions to store in heat maps
+        localData = np.zeros((rows,cols), dtype=np.int32)
+        localT = transactData["LocalT"]
+        for i, j, T in localT:
+            localData[i][j] = T
+
+        remoteDataT = np.zeros((rows,cols), dtype=np.int32)
+        remoteT = transactData["RemoteT"]
+        for i, j, T in remoteT:
+            remoteDataT[i][j] = T
+
+        remoteDataM = np.zeros((rows,cols), dtype=np.int32)
+        remoteM = transactData["RemoteMax"]
+        for i, j, T in remoteM:
+            remoteDataM[i][j] = T
+
+        # max number of transactions in this data time
+        maxActivity = maxTime / (1/50e6 * 1800)
+
+        # construct the heatmaps
+        heatMap(localData, rows, cols, ax=axs[ti, 0], vmin=0, vmax=128, header="ASIC Local Hits")
+        heatMap(remoteDataM, rows, cols, ax=axs[ti, 1], vmin=0, vmax=256, header="ASIC Remote MAX")
+        heatMap(remoteDataT, rows, cols, ax=axs[ti, 2], vmin=0, vmax=maxActivity, header="Asic Remote Transactions")
+
+        # look at how many calls to proc queue are made
+        print(f"{ti} called proc {tile._queue.processed} times.")
+
+        # NOTE: AsicKey deprecated!
+        # for asicKey, hitData in tile._daqNode.hitData.items():
+        #     print(f"Received {len(hitData)} hits from {asicKey}.")
+
+    fig.tight_layout()
+    plt.show()
 
     input("test")
