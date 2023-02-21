@@ -6,16 +6,18 @@ import ROOT
 import numpy as np
 
 from SAQ_DAQ import N_SAQ_CHANNELS
-from qdb_interface import ZYBO_FRQ
 
-def filter_saq(resets, SAQ_DIV, min_time=10e-6):
+def filter_saq(resets, SAQ_DIV, ZYBO_FRQ, min_time=10e-6):
     """
     Ensure that resets time differences exclude impossible minimum time from
     length of reset pulse.
     ARGS:
        resets   : list of 32bit timestamp values from Zybo
-       SAQ_DIV  : clock division register on the zybo. This should be readin from metadata
+       SAQ_DIV  : clock division register on the zybo. This should be read in from metadata
+       ZYBO_FRQ : zybo norminal frequecy in hertz. This should be read in from metadata
        min_time : time in seconds of reset pulse width, default is 10us from SAQ
+    RETURNS:
+       rtds : parsed list of reset time differences
     """
     assert isinstance(resets, list), "expect a list of resets to act on"
 
@@ -35,10 +37,11 @@ def hist_rtd(rtd, ch=0):
     Helper function which can take in a list of an RTD (usually output of
     filter_saq method) and return a filled TH1F with an applied gaus fit.
 
-    This histogram method is intended to finding the mean of the fit for drift
+    This histogram method is intended to find the mean of the fit for drift
     current, therefore the algorithm we use will be to find the mean of the list
-    of rtd, the std of the values, and we will supply bins of of root(len(rtd)) with
-    a bin width of 3 sigma before applying a fit
+    of rtd, the std of the values, and we will supply bins of of sqrt(len(rtd))
+    with a bin width of 3 sigma before applying a fit. This helps the fitter
+    find the region of interest (ROI).
     ARGS:
        rtd : list of RTD in purely timestamp format, conversion into *time*
              should be *last* step
@@ -52,7 +55,7 @@ def hist_rtd(rtd, ch=0):
 
     # build parameters of TH1F
     mean, std = np.mean(rtd), np.std(rtd)
-    nbins = int(np.sqrt(len(rtd)))
+    nbins = int(np.sqrt(len(rtd))) + 1
     h = ROOT.TH1F(f"h_{ch}", "hist", nbins, mean-3*std, mean+3*std)
     for r in rtd:
         h.Fill(r)
@@ -86,15 +89,20 @@ def main(input_file, use_multithread=True):
     masks = data["ChMask"]
 
     # snag the meta data from the tfile
+    # these values are defined in make_root.py script when ROOT file is created
+    # from binary
     tf = ROOT.TFile(input_file, "READ")
     meta_data = tf.mt
     SAQ_DIV = -1
+    ZYBO_FRQ = -1
     version = 0
     for evt in meta_data:
         SAQ_DIV = evt.SAQ_DIV
         version = evt.Version
+        ZYBO_FRQ = evt.Zybo_FRQ
     assert version >= 0x3f, f"version of root file is too old! 0x{version:02x} <= 0x3f"
     assert SAQ_DIV >= 1, f"SAQ_DIV not properly defined: {SAQ_DIV} not >= 1"
+    assert ZYBO_FRQ >= 30e6, f"ZYBO_FRQ not properly defined: {ZYBO_FRQ} not >= 30 MHz"
 
     # make a quick way to ensure the channel we want is in the mask
     m = lambda ch, mask: 1 << ch & mask
@@ -109,17 +117,23 @@ def main(input_file, use_multithread=True):
     # chRTD is a list of a list where the first index is the channel number -1
     # (lists are zero counted), which contain the sequential time since last
     # reset data
-    chRTD = [filter_saq(r, SAQ_DIV) for r in chResets]
+    chRTD = [filter_saq(r, SAQ_DIV, ZYBO_FRQ) for r in chResets]
 
     ###################################
     # extra analysis can proceed here #
     ###################################
 
     # let's make some gaussian histograms of all of the RTDs we have
+    outf = ROOT.TFile("saqAna.root", "RECREATE")
     for ch, rtd in enumerate(chRTD):
         h, mean, sig = hist_rtd(rtd, ch)
-        # conversion from timestamp into time is: val*SAQ_DIV/ZYBO_FRQ
-        print(f"Channel-{ch} has mean={mean.2f} and sigma={sigma.2f}")
+
+        # time conversion lambda
+        t = lambda x : x*SAQ_DIV/ZYBO_FRQ
+
+        # print and save results
+        print(f"Channel-{ch} has mean={t(mean).2e} and sigma={t(sigma).2e}")
+        h.Write()
 
 
 if __name__ == '__main__':
