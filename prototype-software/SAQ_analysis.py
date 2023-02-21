@@ -26,6 +26,8 @@ def filter_saq(resets, SAQ_DIV, ZYBO_FRQ, min_time=10e-6):
     iLastReset = 0
     for i, r in enumerate(resets[:-1]):
         rtd = resets[i+1] - resets[iLastReset]
+        if rtd < 0:
+            rtd += 2**32
         if (rtd * SAQ_DIV) / ZYBO_FRQ  > min_time:
             rtds.append(rtd)
             iLastReset = i+1
