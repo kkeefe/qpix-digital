@@ -205,17 +205,6 @@ begin
                      end if;
 
 
-                  -- Time register - used for calibration signals
-                  when toslv(4, G_REG_ADDR_BITS) =>
-                     if regData.OpRead = '1' then
-                        regResp_r.Addr <= clkCnt(31 downto 16);
-                        regResp_r.Data <= clkCnt(15 downto 0);
-                        regResp_r.XDest <= std_logic_vector(to_unsigned(X_POS_G, G_POS_BITS));
-                        regResp_r.YDest <= std_logic_vector(to_unsigned(Y_POS_G, G_POS_BITS));
-                        regResp_r.Valid <= '1';
-                     end if;
-
-
                   -- Enable register - used to turn on taking real data
                   when toslv(5, G_REG_ADDR_BITS) =>
                      if regData.OpWrite = '1' then
