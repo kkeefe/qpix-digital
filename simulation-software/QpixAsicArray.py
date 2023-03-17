@@ -235,12 +235,12 @@ def PrintTimes(qparray):
             print()
     print("Abs Time Values (us):")
     for i, asic in enumerate(qparray):
-        print(f"{(asic._absTimeNow - qparray[0][0]._absTimeNow)*1e6:1.2E}", end=" ")
+        print(f"{(asic._absTimeNow - qparray._targNode._absTimeNow)*1e6:1.2E}", end=" ")
         if (i+1)%qparray._nrows == 0:
             print()
     print("Measured Time Values (us):")
     for i, asic in enumerate(qparray):
-        print(f"{(asic._measuredTime[-1] - qparray[0][0]._measuredTime[-1])*1e6:3.2f}", end=" ")
+        print(f"{(asic._measuredTime[-1] - qparray._targNode._measuredTime[-1])*1e6:3.2f}", end=" ")
         if (i+1)%qparray._nrows == 0:
             print()
 
@@ -371,7 +371,10 @@ class QpixAsicArray():
         self._asics = self._makeArray(timeout=timeout, randomRate=hitsPerSec)
         self._daqNode = DaqNode(fOsc=self.fNominal, nPixels=0, debugLevel=self._debugLevel, timeout=timeout, randomRate=hitsPerSec)
 
-        self._asics[0][0].connections[AsicDirMask.West.value].asic = self._daqNode
+        # which node should receive the information from the daqNode
+        self._targNode = self[0][0]
+        self._targNode.connections[AsicDirMask.West.value].asic = self._daqNode
+        self._targDir = AsicDirMask(3)
 
         self._alert = 0
         self.totalInjectedHits = 0
@@ -408,7 +411,7 @@ class QpixAsicArray():
                 if self._debugLevel > 0:
                     print(f"Created ASIC at row {i} col {j} with frq: {frq:.2f}")
 
-        # connect the asics within the array
+        # fully connect the asics within the array
         for i in range(self._nrows):
             for j in range(self._ncols):
                 if i > 0:
@@ -523,7 +526,7 @@ class QpixAsicArray():
             request = byte
         else:
             raise QPExcpetion("Unknown word type being sent via command")
-        self._queue.AddQueueItem(self[0][0], AsicDirMask(3), request, self._timeNow, command=command)
+        self._queue.AddQueueItem(self._targNode, self._targDir, request, self._timeNow, command=command)
 
         # move the Array forward in time
         self.Process(timeEnd)
@@ -661,7 +664,7 @@ class QpixAsicArray():
         timeEnd = self._timeNow + interval
         self.Process(timeEnd)
 
-    def Route(self, route=None, timeout=None, transact=True):
+    def Route(self, route=None, timeout=None, transact=True, pos=None):
         '''
         Defines the routing of the asics manually
         ARGS:
@@ -671,13 +674,14 @@ class QpixAsicArray():
                     then moves all data to (0,0)
             snake - serpentine style, snakes through all asics before
                     remote data origin until (0,0)
-        --
-        transact: bool, if true (default) will simulate daq node transactions
-                        if false, will automagically update asic configs
+            trunk - single column down from where the daq node is, and sets the daqNode
+                    to the north position for this ASIC
+            transact: bool, if true (default) will simulate daq node transactions
+                            if false, will automagically update asic configs
         '''
         self.RouteState = route
         if timeout is None:
-            timeout = self[0][0].config.timeout
+            timeout = self._targNode.config.timeout
         if route == None:
             return
         elif route.lower() == 'left':
@@ -709,6 +713,26 @@ class QpixAsicArray():
                     self.WriteAsicRegister(asic.row, asic.col, config)
                 else:
                     asic.config = config
+        elif route.lower() == 'trunk':
+            assert isinstance(pos, int), "must supply daq-node pos with trunk"
+            if pos > 0:
+                assert transact==False, "moving the Daqnode location is not transactable"
+            assert pos < self._ncols-1, "can't move daqNode further than n cols"
+            for asic in self:
+                if asic.col < pos:
+                    config = AsicConfig(AsicDirMask.East, timeout)
+                elif asic.col > pos:
+                    config = AsicConfig(AsicDirMask.West, timeout)
+                else:
+                    config = AsicConfig(AsicDirMask.North, timeout)
+                config.ManRoute = True
+                asic.config = config
+
+            # route the DaqNode to aggregator in the north, and remove it from the 0,0 west spot
+            self._targNode = self[pos][0]
+            self._targNode.connections[AsicDirMask.North.value].asic = self._daqNode
+            self._targDir = AsicDirMask(0)
+            self[0][0].connections[AsicDirMask.West.value].asic = None
         else:
             print("WARNING: unknown route state passed!", self.RouteState)
 

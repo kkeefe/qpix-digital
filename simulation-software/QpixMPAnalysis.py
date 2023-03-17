@@ -161,7 +161,7 @@ def main(seed=2):
     runningProcs, pTiles = [], []
     while completeProcs < nProcs:
 
-        # fill running procs until we use all cpu threads
+        # fill running procs until we use all cpu cores
         while len(runningProcs) <= ncpu and len(procs) > 0:
             runningProcs.append(procs.pop())
 
