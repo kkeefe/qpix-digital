@@ -526,6 +526,7 @@ class QpixAsicArray():
             request = byte
         else:
             raise QPExcpetion("Unknown word type being sent via command")
+        assert self._targNode is not None, "warning no targ node to send to"
         self._queue.AddQueueItem(self._targNode, self._targDir, request, self._timeNow, command=command)
 
         # move the Array forward in time
@@ -729,9 +730,11 @@ class QpixAsicArray():
                 asic.config = config
 
             # route the DaqNode to aggregator in the north, and remove it from the 0,0 west spot
-            self._targNode = self[pos][0]
+            self._targNode = self[0][pos]
             self._targNode.connections[AsicDirMask.North.value].asic = self._daqNode
             self._targDir = AsicDirMask(0)
+
+            # disconnect the old corner node
             self[0][0].connections[AsicDirMask.West.value].asic = None
         else:
             print("WARNING: unknown route state passed!", self.RouteState)

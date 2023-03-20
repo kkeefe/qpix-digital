@@ -345,6 +345,7 @@ class ProcQueue:
         """
         refactor
         """
+        assert asic is not None, "ERROR: can't send data to a None node!"
         procItem = ProcItem(asic, dir, QPByte, inTime, command)
         self._AddQueueItem(procItem)
 
