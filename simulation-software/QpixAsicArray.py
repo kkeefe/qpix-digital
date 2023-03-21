@@ -288,32 +288,57 @@ def PrintTransactMap(qparray, silent=False):
 
     return dMap
 
-def AnalyzeASIC(qparray, row, col):
+def AnalyzeArray(qparray, silent=False):
     """
-    This function should perform a full analysis for a specific ASIC within a qparray.
+    Function tests to ensure that the array has emptied all of the injected hits,
+    and looks at the daqNode to ensure that each ASIC has all of its data within the daq node
+    args:
+        qpixasicarray : array which should be empty
+        silent : flag to indicate whether or not printing should occur during ASIC checks.
+
+    returns:
+        bool : true if daqNode has all correct injected hits from each asic, false otherwise
+    """
+    daqNode = qparray._daqNode
+    if daqNode._localFifo._curSize == 0:
+        print("Analyze: no data in the DAQ Node!")
+        return False
+    recv, injected = daqNode._localFifo._dataWords, qparray.totalInjectedHits
+    msg = f"Analyze: missing injected data recv {recv} != injected {injected}"
+    if recv != injected:
+        print(msg)
+        return False
+
+    # check all of the ASICs
+    for asic in qparray:
+        data, end = AnalyzeASIC(qparray, asic.row, asic.col, silent=silent)
+        if len(data) != asic.totalInjected:
+            print(f"Analyze: Asic data failure at ({asic.row},{asic.col})")
+            return False
+    return True
+
+
+def AnalyzeASIC(qparray, row, col, silent=False):
+    """
+    This function should perform a full analysis for a specific ASIC within qparray.
 
     This means that the DAQ node is expected to be full of data. if not, this will return None,
     indicating a failure.
 
-    It should be able to reconstruct an expected frequency from event words within the DAQ
+    Return tuple of (asicData, asicEnd) within the daqNode on success.
     """
-    daqNode = qparray._daqNode
-    assert daqNode._localFifo._curSize > 0, "no data in the DAQ Node!"
-    recv, injected =  daqNode._localFifo._dataWords, qparray.totalInjectedHits
-    msg = f"missing injected data recv {recv} != injected {injected}"
-    assert recv == injected, msg
-
-    # immediately get a list of all of the data within the DAQNode, and filter
+    # get a list of all of the data within the DAQNode, and filter
     # for the specific ASIC we want
-
+    daqNode = qparray._daqNode
     fifoData = daqNode._localFifo._data
     asicData = [d for d in fifoData if d.row==row and d.col == col and d.wordType==AsicWord.DATA]
     asicEnd = [d for d in fifoData if d.row==row and d.col == col and d.wordType==AsicWord.EVTEND]
 
-    print(f"passed array, found {len(asicData)} hits for ASIC ({row},{col})")
-    print(f"passed array, found {len(asicEnd)} end words for ASIC ({row},{col})")
+    if not silent:
+        print(f"found {len(asicData)} hits for ASIC ({row},{col})")
+        print(f"found {len(asicEnd)} end words for ASIC ({row},{col})")
 
-    return asicData
+    return asicData, asicEnd
 
 ## end helper functions
 
@@ -607,8 +632,7 @@ class QpixAsicArray():
                                     asic.state != AsicState.Idle or
                                     (asic._remoteFifo._curSize > 0 and
                                         (asic.state == AsicState.TransmitRemote or
-                                         asic.state == AsicState.TransmitRemoteFull or
-                                         asic.config.SendRemote == True)
+                                         asic.state == asic.config.SendRemote)
                                      ))]
 
             self._timeNow += self._deltaT

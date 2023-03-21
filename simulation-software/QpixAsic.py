@@ -464,17 +464,18 @@ class QPixAsic:
 
         # Queues / FIFOs
         self.connections = self.AsicConnections(self.transferTime)
-        self._localFifo = QPFifo(maxDepth=256)
-        self._remoteFifo = QPFifo(maxDepth=256)
+        self._localFifo = QPFifo(maxDepth=512)
+        self._remoteFifo = QPFifo(maxDepth=512)
 
         # additional / debug
         self._debugLevel = debugLevel
         self._hitReceptions = 0
         self._measuredTime = []
 
-        # useful things for InjectHits
+        # useful members for InjectHits
         self._times = []
         self._channels = []
+        self.totalInjected = 0
 
     def __repr__(self):
         self.PrintStatus()
@@ -751,6 +752,7 @@ class QPixAsic:
 
         # sort the times and channels, which allow O(1) access for read during push
         times, channels = zip(*sorted(zip(self._times, self._channels)))
+        times = list(times)
 
         # construct the channel byte here in one pass
         # else condition handles output of pyNotebooks
@@ -776,6 +778,7 @@ class QPixAsic:
             self._channels = np.array(channels)
 
         self._times = np.array(times)
+        self.totalInjected += len(times)
 
 
     def _ReadHits(self, targetTime):
@@ -843,7 +846,7 @@ class QPixAsic:
         if self.state == AsicState.Finish:
             return self._processFinishState(targetTime)
 
-        if self.state in (AsicState.TransmitRemote):
+        if self.state == AsicState.TransmitRemote:
             return self._processTransmitRemoteState(targetTime)
 
         if self.state == AsicState.TransmitReg:

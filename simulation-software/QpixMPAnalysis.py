@@ -127,6 +127,43 @@ def runTile(queue, r, t, periods, int_time=MAXTIME):
 
     queue.put(makeData(tile, r, t, int_prd, nHardInt))
 
+def saveData(tile, daq_data=None, data=None):
+    """
+    Helper function to remove dictionary data from the makeData function
+    and to store the relevant data into output dictionaries.
+
+    outputs should be sent to a pd dataframe and then stored in csv.
+    """
+
+    if daq_data is None:
+        daq_data = {}
+    else:
+        assert isinstance(daq_data, dict)
+
+    if data is None:
+        data = {}
+    else:
+        assert isinstance(data, dict)
+
+    # remove the daqData key from this
+    daq_tile = tile.pop(DAQ_KEY, None)
+    if daq_tile is not None:
+        for k,v in daq_tile.items():
+            if daq_data.get(k) is not None:
+                daq_data[k].extend(v)
+            else:
+                daq_data[k] = v
+
+    # build the transaction csv
+    for k,v in tile.items():
+        if data.get(k) is not None:
+            data[k].extend(v)
+        else:
+            data[k] = v
+
+    return daq_data, data
+
+
 
 def main(seed=2):
     """
@@ -181,22 +218,7 @@ def main(seed=2):
     # build all of the serialized data from the MP outputs
     daq_data, data = {}, {}
     for tile in pTiles:
-
-        # remove the daqData key from this
-        daq_tile = tile.pop(DAQ_KEY, None)
-        if daq_tile is not None:
-            for k,v in daq_tile.items():
-                if daq_data.get(k) is not None:
-                    daq_data[k].extend(v) 
-                else:
-                    daq_data[k] = v
-
-        # build the transaction csv
-        for k,v in tile.items():
-            if data.get(k) is not None:
-                data[k].extend(v) 
-            else:
-                data[k] = v
+        daq_data, data = saveData(tile, daq_data, data)
 
     # create the dataframe from from these dictionaries
     df = pd.DataFrame.from_dict(data)

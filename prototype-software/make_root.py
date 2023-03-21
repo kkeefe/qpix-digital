@@ -90,8 +90,8 @@ def main(input_file, output_file, version, start_hits, triggers, saqDiv=0):
     tf.Write()
 
     # if we read the full binary file correctly, delete it
-    if not fail:
-        os.remove(input_file)
+    # if not fail:
+    #     os.remove(input_file)
 
 if __name__ == "__main__":
     if len(sys.argv) != 7:
@@ -102,4 +102,5 @@ if __name__ == "__main__":
         version = int(sys.argv[3])
         start_hits = int(sys.argv[4])
         stop_hits = int(sys.argv[5])
-        main(input_file, output_file, version, start_hits, stop_hits)
+        saq_div = int(sys.argv[6])
+        main(input_file, output_file, version, start_hits, stop_hits, saq_div)

@@ -62,7 +62,7 @@ def hist_rtd(rtd, ch=0):
     for r in rtd:
         h.Fill(r)
 
-    h.Fit("gaus")
+    h.Fit("gaus", "RQ")
     mu = h.GetFunction("gaus").GetParameter("Mean")
     sig = h.GetFunction("gaus").GetParameter("Sigma")
 
@@ -134,7 +134,7 @@ def main(input_file, use_multithread=True):
         t = lambda x : x*SAQ_DIV/ZYBO_FRQ
 
         # print and save results
-        print(f"Channel-{ch} has mean={t(mean).2e} and sigma={t(sigma).2e}")
+        print(f"Channel-{ch} has mean={t(mean):2e} and sigma={t(sig):2e}")
         h.Write()
 
 
