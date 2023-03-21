@@ -71,7 +71,6 @@ class AsicState(Enum):
     TransmitReg = 3
     Finish = 4
     # Extra modified states
-    TransmitRemoteFull = 6
 
 
 class AsicWord(Enum):
@@ -844,7 +843,7 @@ class QPixAsic:
         if self.state == AsicState.Finish:
             return self._processFinishState(targetTime)
 
-        if self.state in (AsicState.TransmitRemote, AsicState.TransmitRemoteFull):
+        if self.state in (AsicState.TransmitRemote):
             return self._processTransmitRemoteState(targetTime)
 
         if self.state == AsicState.TransmitReg:
@@ -963,7 +962,6 @@ class QPixAsic:
         # this ASICs time reaches targetTime, or until the remote
         # FIFO is empty, and the FIFO has not timed out
         hitlist = []
-        self._changeState(AsicState.TransmitRemoteFull)
         while (
                 self._remoteFifo._curSize > 0 and
                 not self.timeout() and
