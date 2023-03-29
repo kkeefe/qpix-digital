@@ -52,12 +52,12 @@ def RDFAna(rdf_file, xpos, ypos):
     return values of interest for the makePandasDF function call here
     """
     rdf = ROOT.RDataFrame('event_tree', rdf_file)
-    
+
     # make sure reasonable timescale for the neutrino events
     rdf = rdf.Filter("pixel_reset < 1e-1") 
     total_resets = rdf.Count().GetValue()
-    rdf = rdf.Filter(f"pixel_x < {xpos} + 40 && pixel_x > {xpos} - 40")
-    rdf = rdf.Filter(f"pixel_x < {xpos} + 40 && pixel_x > {xpos} - 40")
+    rdf = rdf.Filter(f"pixel_x < {int(xpos/0.4)} + 40 && pixel_x > {int(xpos/0.4)} - 40")\
+             .Filter(f"pixel_y < {int(ypos/0.4)} + 40 && pixel_y > {int(ypos/0.4)} - 40")
     tile_resets = rdf.Count().GetValue()
                      
     return total_resets, tile_resets
@@ -71,11 +71,11 @@ def GetRDFData(f, q):
     a.append(f)
     a.append(rtd_f)
     if rtd_f is not None:
-        total_resets, tile_resets = RDFAna(rtd_f, a[3], a[4])
+        total_resets, tile_resets = RDFAna(rtd_f, a[2], a[3])
         a.append(total_resets)
         a.append(tile_resets)
         rdf = ROOT.RDataFrame('event_tree', f)
-        rdf = rdf.Filter('hit_start_t < 1') # only look for hits within reasonable time
+        rdf = rdf.Filter('hit_start_t < 1e-1') # only look for hits within reasonable time
         a.append(rdf.Sum('hit_energy_deposit').GetValue())
     else:
         a.extend([0, 0, 0])
@@ -95,7 +95,7 @@ def main():
     ncpu = 20
 
     # pull architecture procs
-    procs = [mp.Process(target=GetRDFData, args=(sort, q)) for sort in sort_files]
+    procs = [mp.Process(target=GetRDFData, args=(sort, q)) for sort in sort_files[:2000]]
 
     nProcs = len(procs)
     print(f"begginning processing of {nProcs} tiles.")
@@ -116,9 +116,10 @@ def main():
                 runningProcs.pop(ip)
 
         # wait to get anything on the queue
-        qdata.append(q.get())
-        completeProcs = len(qdata)
-        print(f"Completed procs {completeProcs}, {completeProcs/nProcs*100:0.2f}%..")
+        if not q.empty():
+            qdata.append(q.get())
+            completeProcs = len(qdata)
+            print(f"Completed procs {completeProcs}, {completeProcs/nProcs*100:0.2f}%..")
 
     d = {'FHC':[], 'nHC':[], 'xpos':[], 'ypos':[], 'zpos':[], 'seed':[], 'atZ':[],
          'sortFile':[], 'rtdFile':[],
@@ -139,7 +140,7 @@ def main():
 
     df = pd.DataFrame(data=d)
     print(df)
-    df.to_csv("./neutrinoAna.csv")
+    df.to_csv("./neutrinoAna_tmp.csv")
     print("completed creating of neutrino df")
 
 
