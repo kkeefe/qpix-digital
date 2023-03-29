@@ -479,7 +479,7 @@ class QPixAsic:
 
     def __repr__(self):
         self.PrintStatus()
-        return ""
+        return f"QPA-({self.row},{self.col})"
 
     def __gt__(self, other):
         """
@@ -825,13 +825,12 @@ class QPixAsic:
         if self.isDaqNode or self._absTimeNow >= targetTime:
             return []
 
-
         ## QPixRoute State machine ##
         if self.state == AsicState.Idle:
 
-            # if the ASIC is in a push state, check for any new hits, if so
-            # start sending them
-            if self.config.EnablePush and self._ReadHits(targetTime) > 0:
+            # if the ASIC is in a push state enter transmit local on any
+            # depth in the local fifo
+            if self.config.EnablePush and self._localFifo._curSize > 0:
                 self._changeState(AsicState.TransmitLocal)
 
             elif self.config.SendRemote and self._remoteFifo._curSize > 0:
@@ -906,6 +905,7 @@ class QPixAsic:
                     hit,
                     sendT,
                 ))
+
         if self._localFifo._curSize == 0:
             self._changeState(AsicState.Finish)
         return localTransfers
@@ -1033,6 +1033,9 @@ class QPixAsic:
         should only move forward in time and update if the ASIC is not already this
         far forward in time.
         """
+
+        if self.config.EnablePush:
+            self._ReadHits(absTime)
 
         transT = absTime
         if dir is not None:

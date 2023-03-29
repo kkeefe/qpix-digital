@@ -186,6 +186,8 @@ def viewAsicState(qparray, time_begin=-100e-9, time_end=300e-6, ordering="Normal
     plt.legend(markers, color_mapping.keys(), numpoints=1)
     plt.show()
 
+    return fig, ax
+
 def PrintTsMap(qparray):
     """
     boiler plate code for printing interesting data about each asic
