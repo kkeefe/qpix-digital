@@ -195,9 +195,9 @@ begin
 
     -- connect the switches to the LEDs
     -- led <= sw;
-    je <= sw;
---    je(0) <= fclk;
---    je(3 downto 1) <= sw(3 downto 1);
+    -- je <= sw;
+    je(0) <= fclk;
+    je(3 downto 1) <= sw(3 downto 1);
     -- je(1) <= sw(1); -- direct pin or switch 
     DaqTx <= s_daqTx;
     s_daqRx <= DaqRx;   
@@ -303,7 +303,7 @@ begin
             S_AXIS_0_tlast   => S_AXI_0_tlast,
             S_AXIS_0_tvalid  => S_AXI_0_tvalid,
             S_AXIS_0_tkeep   => "1111",
-            s_axis_aresetn_0 => not saqRst,
+            -- s_axis_aresetn_0 => not saqRst,
 
             -- clk + rst
             aresetn                   => axi_resetn,
@@ -360,7 +360,7 @@ begin
    generic map (
       X_NUM_G        => X_NUM_G,
       Y_NUM_G        => Y_NUM_G,
-      Version        => x"0000_003f",
+      Version        => x"1000_003f",
       N_SAQ_PORTS    => N_SAQ_PORTS,
       TIMESTAMP_BITS => TIMESTAMP_BITS
    )

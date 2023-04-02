@@ -78,12 +78,12 @@ architecture behav of QpixComm is
 
    signal RxByteArr        : QpixByteArrType      := (others => (others => '0'));
 
-   signal RxBytesAck       : std_logic_vector(3 downto 0);
-   signal RxBytesValid     : std_logic_vector(3 downto 0);
-   signal RxBusyArr        : std_logic_vector(3 downto 0);
-   signal RxErrorArr       : std_logic_vector(3 downto 0);
+   signal RxBytesAck       : std_logic_vector(3 downto 0) := (others => '0');
+   signal RxBytesValid     : std_logic_vector(3 downto 0) := (others => '0');
+   signal RxBusyArr        : std_logic_vector(3 downto 0) := (others => '0');
+   signal RxErrorArr       : std_logic_vector(3 downto 0) := (others => '0');
 
-   signal TxReadyMask        : std_logic;
+   signal TxReadyOr        : std_logic := '0';
 
    --signal parseDataTx           : QpixDataFormatType := QpixDataZero_C;
 
@@ -219,7 +219,6 @@ begin
       parseDataRx => parseDataRx,           -- input
 
       -- regFile configurations
-      qpixConf => qpixConf,             -- input
       regData => regData,               -- output
       regResp => regResp                -- input
    );

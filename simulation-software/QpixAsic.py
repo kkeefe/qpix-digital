@@ -1088,6 +1088,12 @@ class QPixAsic:
                     nConn += 1
             return nConn
 
+        def GetTransactions(self):
+            """
+            Return how many times this Tx transactions were used to send a
+            packet
+            """
+
         def HasConnection(self, dir):
             return bool(self[dir])
 

@@ -7,6 +7,33 @@ import time
 import numpy as np
 
 ## helper functions
+def OrderAsics(qparray, ordering="Normal"):
+    asics = []
+    # normal ordering
+    if ordering == "Normal":
+        for asic in qparray:
+            asics.append(asic)
+    # order main column on bottom followed by other rows
+    elif ordering.lower() == "left":
+        colAsics = [a for a in qparray if a.col == 0]
+        rowAsics = [a for a in qparray if a.col != 0]
+        asics.extend(colAsics)
+        asics.extend(rowAsics)
+    elif ordering.lower() == "snake":
+        for i in range(qparray._nrows):
+            for j in range(qparray._ncols):
+                if i%2 == 0:
+                    asics.append(qparray[i][j])
+                else:
+                    asics.append(qparray[i][(qparray._ncols - 1) - j])
+    # attempt to order in the perceived shortest broadcast distance
+    else:
+        r, c = qparray._nrows, qparray._ncols
+        for i in range(r+c):
+            dAsics = sorted([a for a in qparray if a.row+a.col == i], reverse=True)
+            asics.extend(dAsics)
+    return asics
+
 def MakeFifoBars(qparray):
     import matplotlib.pyplot as plt
     import matplotlib.patches as mpatches
@@ -114,36 +141,13 @@ def viewAsicState(qparray, time_begin=-100e-9, time_end=300e-6, ordering="Normal
     for state in AsicState:
         color_mapping[state] = f"C{state.value}"
 
-    asics = []
-    # normal ordering
-    if ordering == "Normal":
-        for asic in qparray:
-            asics.append(asic)
-    # order main column on bottom followed by other rows
-    elif ordering.lower() == "left":
-        colAsics = [a for a in qparray if a.col == 0]
-        rowAsics = [a for a in qparray if a.col != 0]
-        asics.extend(colAsics)
-        asics.extend(rowAsics)
-    elif ordering.lower() == "snake":
-        for i in range(qparray._nrows):
-            for j in range(qparray._ncols):
-                if i%2 == 0:
-                    asics.append(qparray[i][j])
-                else:
-                    asics.append(qparray[i][(qparray._ncols - 1) - j])
-    # attempt to order in the perceived shortest broadcast distance
-    else:
-        r, c = qparray._nrows, qparray._ncols
-        for i in range(r+c):
-            dAsics = sorted([a for a in qparray if a.row+a.col == i], reverse=True)
-            asics.extend(dAsics)
+    asics = OrderAsics(qparray, ordering)
 
     # unpack the data into arrays of states and times
     states = [[] for i in range(len(asics))]
     absTimes = [[] for i in range(len(asics))]
     for i, asic in enumerate(asics):
-        for (state, _, absTime) in asic.state_times:
+        for (state, _, absTime, *_) in asic.state_times:
             states[i].append(state)
             absTimes[i].append(absTime)
 
@@ -185,6 +189,29 @@ def viewAsicState(qparray, time_begin=-100e-9, time_end=300e-6, ordering="Normal
     markers = [plt.Line2D([0,0],[0,0],color=color, marker='o', linestyle='') for color in color_mapping.values()]
     plt.legend(markers, color_mapping.keys(), numpoints=1)
     plt.show()
+
+    return fig, ax
+
+def viewAsicBuffers(qparray):
+    """
+    Helper function to go through the ASIC states.
+    Create two plots. One for all of the local fifo sizes as a function of time,
+    and the other for the remote fifos as a function of time.
+    """
+    color_mapping = {}
+    for state in AsicState:
+        color_mapping[state] = f"C{state.value}"
+
+    asics = OrderAsics(qparray)
+    # unpack the data into arrays of states and times
+    states = [[] for i in range(len(asics))]
+    absTimes = [[] for i in range(len(asics))]
+    for i, asic in enumerate(asics):
+        for (state, _, absTime, *_) in asic.state_times:
+            states[i].append(state)
+            absTimes[i].append(absTime)
+
+    fig, ax = plt.subplots(1,2)
 
     return fig, ax
 

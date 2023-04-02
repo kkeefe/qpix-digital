@@ -333,12 +333,10 @@ begin
     end process counter;
    ---------------------------------------------
 
-
    -----------------------------------------------
    -- Q-Pix data tranceiver
    -- data parsing / physical layer
    -----------------------------------------------
-
    QpixComm_U : entity work.QpixComm
    generic map(
       RAM_TYPE      => RAM_TYPE,
@@ -410,5 +408,28 @@ begin
       state         => route_state,
       routeStateInt => open);
    -----------------------------------------------
+
+   ---------------------------------------------------
+   -- Process ASIC internal data with defined format
+   ---------------------------------------------------
+   -- QpixDataProc_U : entity work.QpixDataProc
+   -- generic map(
+   --    X_POS_G         => X_POS_G,
+   --    Y_POS_G         => Y_POS_G,
+   --    N_ANALOG_CHAN_G => G_N_ANALOG_CHAN
+   -- )
+   -- port map(
+   --    clk            => clk,
+   --    rst            => rst,
+   --    disIfRouteBusy => qpixConf.disIfBusy,
+   --    routeBusy      => routeBusy,
+   --    chanEna        => qpixConf.chanEna,
+   --    clkCnt         => clkCnt,
+   --    fifoFull       => locFifoFull,
+   --    testEna => '0',
+   --    qpixRstPulses => inPorts,
+   --    --inPorts => inPorts,
+   --    outData => inData
+   -- );
 
 end Behavioral;

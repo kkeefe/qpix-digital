@@ -313,7 +313,9 @@ class QPIX_GUI(QMainWindow):
         saqDiv.setValue(1)
         saqDiv.valueChanged.connect(self.setSAQDiv)
         hDivLayout.addWidget(saqDiv)
+        self._saqDivReg = -1
         self._saqDivBox = saqDiv
+
 
         self._saqDivLCD = QLCDNumber()
         self._saqDivLCD.display(1)
