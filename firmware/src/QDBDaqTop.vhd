@@ -534,18 +534,23 @@ begin
      if rising_edge(fclk) then
      
        -- LED Flashing conditions
-        cr5 := saqForce = '1';
-        cg5 := saqEnable = '1';
-        cb5 := saqRst = '1';
+--        cr5 := saqForce = '1';
+--        cg5 := saqEnable = '1';
+--        cb5 := saqRst = '1';
+
+        cr5 := evtSize /= (others => '0');
+        cg5 := s_daqRx = '1';
+        cb5 := s_daqTx = '1';
               
         cr6 := saq_fifo_full = '1';
-        cg6 := saq_fifo_empty = '1';
+        cg6 := saqEnable = '1';
         cb6 := saq_fifo_valid = '1';
     
         -- proc's RGB
         pulseLED(cr5, start_pulse_red, pulse_count_red, pulse_red);
         pulseLED(cb5, start_pulse_blu, pulse_count_blu, pulse_blu);
         pulseLED(cg5, start_pulse_gre, pulse_count_gre, pulse_gre);
+        
         -- led6 RGB
         pulseLED(cr6, start_pulse_red6, pulse_count_red6, pulse_red6);
         pulseLED(cb6, start_pulse_blu6, pulse_count_blu6, pulse_blu6);
