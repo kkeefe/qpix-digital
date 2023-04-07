@@ -23,6 +23,10 @@ simulation-rtd/radiogenic
 *bin
 *ini
 *csv
+*xml
+*iml
+*pdf
 *png
 *checkpoints*
 AutoDict*
+.idea
