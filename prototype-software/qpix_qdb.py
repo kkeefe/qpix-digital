@@ -1,6 +1,6 @@
 # interfacing dependcies
-from qdb_interface import (AsicREG, AsicCMD, AsicEnable, AsicMask,
-                           qdb_interface, QDBBadAddr, REG, SAQReg, DEFAULT_PACKET_SIZE)
+from qdb_interface import (AsicREG, AsicCMD, AsicMask,
+                           qdb_interface, QDBBadAddr, REG, SAQReg, DEFAULT_PACKET_SIZE, ZYBO_FRQ)
 import os
 import sys
 import time
@@ -159,8 +159,8 @@ class QPIX_GUI(QMainWindow):
         layout.addWidget(btn_getFrq, 0, 4)
 
         btn_iter = QPushButton()
-        btn_iter.setText('iter trg')
-        btn_iter.clicked.connect(self.begin_trig_clock)
+        btn_iter.setText('get fifo cnt')
+        btn_iter.clicked.connect(self.get_fifo_cnt)
         layout.addWidget(btn_iter, 1, 0)
 
         ## ASIC commands ##
@@ -175,64 +175,51 @@ class QPIX_GUI(QMainWindow):
         layout.addWidget(btn_mask, 1, 2)
 
         btn_gtimeout = QPushButton()
-        btn_gtimeout.setText('get timeout')
-        btn_gtimeout.clicked.connect(self.getAsicTimeout)
+        btn_gtimeout.setText('read reg')
+        btn_gtimeout.clicked.connect(self.readReg)
         layout.addWidget(btn_gtimeout, 1, 3)
 
-        btn_stimeout = QPushButton()
-        btn_stimeout.setText('set timeout')
-        btn_stimeout.clicked.connect(self.setAsicTimeout)
-        layout.addWidget(btn_stimeout, 1, 4)
+        btn_writeReg = QPushButton()
+        btn_writeReg.setText('write reg')
+        btn_writeReg.clicked.connect(self.writeReg)
+        layout.addWidget(btn_writeReg, 1, 4)
 
-        self.chk_enable = QCheckBox()
-        self.chk_enable.setText('asic enable')
-        self.chk_enable.setCheckState(0)
-        self.chk_enable.stateChanged.connect(self.enableAsic)
-        layout.addWidget(self.chk_enable, 0, 5)
+        # self.chk_enable = QCheckBox()
+        # self.chk_enable.setText('asic route')
+        # self.chk_enable.setCheckState(0)
+        # self.chk_enable.stateChanged.connect(self.routeAsic)
+        # layout.addWidget(self.chk_enable, 0, 5)
 
         ##  Int Containers  ###
         sBox = QSpinBox()
-        sBox.setValue(1)
-        sBox.setRange(1, 100)
+        self.sBox = sBox
+        sBox.setValue(42)
+        sBox.setRange(0, 1<<18)
         layout.addWidget(sBox, 3, 0)
         # lsBox = QLabel()
         # lsBox.setText("N-Integrations")
 
-        sBox_frqStart = QSpinBox()
-        sBox_frqStart.setValue(1)
-        sBox_frqStart.setRange(1, 100)
-        layout.addWidget(sBox_frqStart, 3, 1)
+        self.sBoxOffset = QSpinBox()
+        self.sBoxOffset.setValue(16)
+        self.sBoxOffset.setRange(14, 18)
+        layout.addWidget(self.sBoxOffset, 3, 1)
         # lsBox = QLabel()
         # lsBox.setText("Frq Start (Hz)")
 
-        sBox_frqStop = QSpinBox()
-        sBox_frqStop.move(240,80)
-        sBox_frqStop.setValue(5)
-        sBox_frqStop.setRange(1, 100)
-        layout.addWidget(sBox_frqStop, 3, 2)
+        self.sBoxOffsetVal = QSpinBox()
+        self.sBoxOffsetVal.move(240,80)
+        self.sBoxOffsetVal.setValue(420)
+        self.sBoxOffsetVal.setRange(0, 3)
+        layout.addWidget(self.sBoxOffsetVal, 3, 2)
         # lsBox = QLabel()
         # lsBox.setText("Frq Stop (Hz)")
         # lsBox.move(310, 85)
 
-        sBox_frqIter = QDoubleSpinBox()
-        sBox_frqIter.move(240,120)
-        sBox_frqIter.setValue(0.5)
-        sBox_frqIter.setRange(0.1, 100)
-        layout.addWidget(sBox_frqIter, 3, 3)
-        # lsBox = QLabel()
-        # lsBox.setText("Frq Iteration")
-        # lsBox.move(340, 125)
-
-        # button information for interrogation timer
-        sBox_timeIter = QDoubleSpinBox()
-        sBox_timeIter.move(120,200)
-        sBox_timeIter.setValue(0.5)
-        sBox_timeIter.setRange(0.1, 100)
-        layout.addWidget(sBox_timeIter)
-        self._timeValue = sBox_timeIter
-        # lsBox = QLabel()
-        # lsBox.setText("time Iteration")
-        # lsBox.move(240, 205)
+        self.s_boxWrite = QSpinBox()
+        self.s_boxWrite.move(240,120)
+        self.s_boxWrite.setValue(0)
+        self.s_boxWrite.setRange(0, 100)
+        layout.addWidget(self.s_boxWrite, 3, 3)
 
         self._qdbPage.setLayout(layout)
         return self._qdbPage
@@ -348,7 +335,7 @@ class QPIX_GUI(QMainWindow):
     def initialize(self):
         """
         main working function which provides a one-click setup
-        
+
         to initialze the array. Current implementation of the hdl
         in the lattice chips require a reset, and non-default routing
         """
@@ -356,6 +343,22 @@ class QPIX_GUI(QMainWindow):
         # pointed downwards
         self.resetAsic(0,0)
         self.setAsicDirMask(0,0, AsicMask.DirDown)
+
+    def readReg(self):
+        val = self.sBox.value()
+        offset = self.sBoxOffsetVal.value() << self.sBoxOffset.value()
+        val += offset
+        print(f"reading reg: 0x{val:06x}")
+        readVal = self.qpi.regRead(val)
+        print(f"read from reg: 0x{readVal:08x}")
+
+    def writeReg(self):
+        addr = self.sBox.value()
+        offset = self.sBoxOffsetVal.value() << self.sBoxOffset.value()
+        addr += offset
+        val = self.s_boxWrite.value()
+        print(f"writing reg: 0x{addr:06x} with val: 0x{val:02x}")
+        self.qpi.regWrite(addr, val)
 
     def trigger(self):
         """
@@ -365,7 +368,7 @@ class QPIX_GUI(QMainWindow):
         will be recorded into the BRAM within QpixDaqCtrl.vhd.
         """
         addr = REG.CMD
-        val = AsicCMD.Interrogation
+        val = AsicCMD.HardInterrogation
         self.readEvents()
         wrote = self.qpi.regWrite(addr, val)
 
@@ -383,7 +386,7 @@ class QPIX_GUI(QMainWindow):
         """
         addr = REG.EVTSIZE
         evts = self.qpi.regRead(addr)
-        if evts:
+        if evts is not None or evts > 0:
             print("found evts:", evts)
         else:
             print("no events recorded.")
@@ -393,6 +396,9 @@ class QPIX_GUI(QMainWindow):
         trigTime = self.getTrigTime()
         if trigTime == self._lastTrig:
             print("WARNING already recorded this event")
+            return
+        if trigTime is None:
+            print("WARNING: received Nonetype in a trigger read")
             return
         self._data["trgT"][0] = trigTime
         self._lastTrig = trigTime
@@ -448,6 +454,7 @@ class QPIX_GUI(QMainWindow):
         is initiated.
         """
         trgTime = self.qpi.regRead(REG.TRGTIME)
+        print("trgTime: ", trgTime)
         return trgTime
 
     def estimateFrequency(self):
@@ -508,9 +515,13 @@ class QPIX_GUI(QMainWindow):
             print("starting clock..")
             self._clock.start()
 
+    def get_fifo_cnt(self, ix=0, iy=0):
+        addr = REG.FIFO(ix, iy)
+        self.qpi.regRead(addr)
+        print("reading fifo evt")
     def loopInterrogations(self, nInts: int, lFrqs: list):
         """
-        function designed to loop through a interval set to test how quickly 
+        function designed to loop through a interval set to test how quickly
         interrogations can happen and still retrieve all of the data from remote
         ASICs
         ARGS:
@@ -529,6 +540,7 @@ class QPIX_GUI(QMainWindow):
                 evts = self.readEvents()
                 tFin = time.time()
 
+
     ############################
     ## ASIC specific Commands ##
     ############################
@@ -540,29 +552,6 @@ class QPIX_GUI(QMainWindow):
         val = AsicCMD.ResetAsic
         self.qpi.regWrite(addr, val)
 
-    def enableAsic(self, state, xpos=0, ypos=0):
-        """
-        Use AsicReg.ENA addr to set various types of AsicEnable configurations
-
-        state - arg capture from state change of the checkbox
-
-        Default is all on.
-        """
-        addr = REG.ASIC(xpos, ypos, AsicREG.ENA)
-        if self.chk_enable.isChecked():
-            val = AsicEnable.ALL
-        else:
-            val = AsicEnable.OFF
-        self.qpi.regWrite(addr, val)
-
-        # read back the data that we think we enabled to see if it makes sense
-        x, y, wordType, addr, enabled = self._readAsicEnable()
-
-        if x != xpos or y != ypos:
-            print(f"Enable WARNING: Read ({x}, {y}) instead of ({xpos},{ypos})")
-        elif val != enabled:
-            print(f"Enable WARNING: did not read correct enable value")
-            print(f"\t expected {val} : actual {enabled}")
 
     def setAsicDirMask(self, xpos=0, ypos=0, mask=AsicMask.DirDown):
         """
@@ -571,7 +560,7 @@ class QPIX_GUI(QMainWindow):
         if not isinstance(mask, AsicMask):
             raise QDBBadAddr("Incorrect AsicMask!")
 
-        addr = REG.ASIC(xpos, ypos, AsicREG.DIR)
+        addr = REG.ASIC(xpos, ypos, AsicREG.DIRMASK)
         val = mask
         self.qpi.regWrite(addr, val)
 
@@ -674,7 +663,7 @@ class QPIX_GUI(QMainWindow):
         else:
             self._saqDivReg = setDiv
             self._saqDivLCD.display(int(ZYBO_FRQ/setDiv))
-        
+
     def getSAQDiv(self):
         """
         Read the value from the SAQDiv register. See setSAQDiv for description
@@ -837,31 +826,6 @@ class QPIX_GUI(QMainWindow):
 
         return x, y, wordType, addr, timeout
 
-    def _readAsicEnable(self):
-        """
-        special helper function to read the register at this location, largely
-        based off of read timeout function
-        """
-        # NOTE: A request data from an asic resets MEM addr,
-        # and that the MEM addr goes back to zero..
-        word1 = self.qpi.regRead(REG.MEM(0, 0))
-        word2 = self.qpi.regRead(REG.MEM(0, 1))
-
-        # records when byte was received, and not related to ASIC reg request
-        # daqTime = self.qpi.regRead(REG.MEM(0, 2))
-
-        # first 32 bits
-        # data in enable is the bottom 3 bits of data
-        enabled = AsicEnable(word1 & 0x0007)
-        addr = (word1 >> 16) & 0xffff
-
-        # next 32 bits
-        y = word2 & 0xf
-        x = (word2 >> 4) & 0xf
-        wordType = (word2 >> 24) & 0xf
-
-        return x, y, wordType, addr, enabled
-        
     def launchSaqDialog(self):
         """
         Function should manage creation of QDialog box which, if accepted,
@@ -920,7 +884,7 @@ class QPIX_GUI(QMainWindow):
         self.saq_lcd_enable.clicked.connect(self._enableLCDUpdate)
         self.statusBar.addWidget(self.saq_lcd_enable)
 
-        # include a stop button, which will deactivate mask (prevent any triggers) and 
+        # include a stop button, which will deactivate mask (prevent any triggers) and
         # issue a flush to the FIFO. This SHOULD NOT deactivate saqEnable, which
         # will prevent saqFifo from writing to data fifo
         self.saq_force = QPushButton("SAQ Flush")

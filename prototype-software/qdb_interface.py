@@ -36,7 +36,7 @@ SAQ_TMP_FILE = "./bin/saqTmp.bin"
 
 # DMA_CONTROL constant globals that should ensure DMA registers
 # each register stores 32b, but not all bits are used at certain registers..
-DMA_CTRL = 0x0001_1003 
+DMA_CTRL = 0x0001_1003
 DMA_STATUS = 0x0000_0000
 DMA_LENGTH = 0x0000_3fff
 DMA_DEST_MSB = 0x0000_0000
@@ -77,11 +77,12 @@ class AsicREG(Enum):
     """
     CMD = 1
     TIMEOUT = 2
-    DIR = 3
-    # special address where both data will be written over the top of addr
-    CAL = 4
-    # enable addr
-    ENA = 5
+    DIRMASK = 3
+    CHMASK = 4
+    COORDINATE = 5
+    TXRX_DISABLE = 6
+    LOC_DISABLE = 7
+    INT_NUMBER = 8
 
 
 class SAQReg(Enum):
@@ -130,6 +131,18 @@ def MemAddr(evt, pos):
     return evtMask + event + pos
 
 
+def FIFOAddr(ix, iy):
+    """
+    read from the 2<<16 addr for testing
+    """
+    ix = (ix & 0b1111) << 2
+    iy = (iy & 0b1111) << 6
+    fifo_addr = 2 << 16
+
+    val = ix + iy + fifo_addr
+
+    return val << 2
+
 def AsicAddr(xpos=0, ypos=0, remote_addr=AsicREG.CMD):
     """
     return address space for remote ASIC.
@@ -144,7 +157,8 @@ def AsicAddr(xpos=0, ypos=0, remote_addr=AsicREG.CMD):
         # QpixDaqCtrl.vhd selects these address spaces:
         xp = ((xpos & 0b111)<<6)
         yp = ((ypos & 0b111)<<3)
-        dest_flag = 1 << 9
+        # dest_flag = 1 << 9
+        dest_flag = 0
 
         # this address flag is defined within QpixProtoRegMap.vhd
         asic_addr_flag = 3 << 16
@@ -153,7 +167,7 @@ def AsicAddr(xpos=0, ypos=0, remote_addr=AsicREG.CMD):
         addr = asic_addr_flag + dest_flag + xp + yp + remote_addr.value
         return addr
 
-    
+
 def SaqAddr(addr=SAQReg.SCRATCH):
     """
     List of address spaces available to read for the SAQ addr.
@@ -178,11 +192,13 @@ class AsicMask(Enum):
     The mask values (1,2,4,8) are defined in QPixPkg.vhd.
 
     The 0x10 bit sets the manual routing bit, as defined in QpixRegFile.vhd.
+
+    the (1 << 4) is the dirMask enable bit
     """
-    DirUp = 1 + 0x10
-    DirRight = 2 + 0x10
-    DirDown = 4 + 0x10
-    DirLeft = 8 + 0x10
+    DirUp = 1 + (1 << 4)
+    DirRight = 2 + (1 << 4)
+    DirDown = 4 + (1 << 4)
+    DirLeft = 8 + (1 << 4)
 
 
 class AsicCMD(Enum):
@@ -193,35 +209,10 @@ class AsicCMD(Enum):
 
     These values should only be used at the specfic addr REG.ASIC(x, y, AsicREG.CMD).
     """
-    Interrogation = 0x1
-    ResetState = 0x2
+    HardInterrogation = 0x1
+    SoftInterrogation = 0x2
     ResetAsic = 0x4
-
-
-class AsicEnable(Enum):
-    """
-    Represents Values.
-
-    Usage:
-    qpi.regWrite(REG.ASIC(x, y, AsicREG.ENA), AsicEnable.SND)
-
-    Simple Enum class to simplify remote ASIC enable types.
-
-    These values can only be used at the specfic addr REG.ASIC(x, y, AsicREG.ENA).
-
-    Values are defined in QpixRegFile.vhd and written to QpixConf type, defined
-    in QPixPkg.vhd.
-    """
-    SND = 0x1 # enables analog data while sending
-    RCV = 0x2 # enables analog data while receiving
-    REG = 0x4 # enables analog data while broadcasting
-    ALL = 0x7 # enables analog data in all situations
-    OFF = 0x0 # disables analog data
-
-    # combination states
-    SND_RCV = 0x3
-    SND_REG = 0x5
-    RCV_REG = 0x6
+    ResetState = 0x8
 
 
 class REG(Enum):
@@ -245,6 +236,7 @@ class REG(Enum):
     """
 
     # all of these addresses are defined in QpixProtoPkg.vhd
+    # and are registers local to the Zybo/Aggregator
     SCRATCH   = 0x00
     CMD       = 0x0A
     STATUS    = 0x01
@@ -264,6 +256,9 @@ class REG(Enum):
     # event memory slots
     MEM = MemAddr
 
+    # fifo addr
+    FIFO = FIFOAddr
+
     # remote Asic Callable address class
     ASIC = AsicAddr
 
@@ -274,13 +269,13 @@ class REG(Enum):
 class saqUDPworker(QObject):
     """
     This class is sent to a new thread, and monitors
-    the output of the UDP port that sends burst data. 
-    It should listen to and read from the UDP socket, and then dump 
+    the output of the UDP port that sends burst data.
+    It should listen to and read from the UDP socket, and then dump
     all data into an output file.
     """
     finished = pyqtSignal()
     new_data = pyqtSignal(object)
-    
+
     def __init__(self):
         super().__init__()
 
@@ -290,7 +285,7 @@ class saqUDPworker(QObject):
 
         self.output_file = datetime.datetime.now().strftime('./bin/%m_%d_%Y_%H_%M_%S.bin')
         self.f = open(self.output_file, 'wb')
-        
+
     def _udp_connect(self):
         # try to connect to the UDP socket
         print("udp connecting..", end="")
@@ -330,7 +325,7 @@ class saqUDPworker(QObject):
             self.finished.emit()
         else:
             self._udpsocket.readyRead.connect(self.on_readyRead)
-        
+
 
 class DMA_REG(Enum):
     """
@@ -411,7 +406,7 @@ class qdb_interface(QObject):
         """
         # allow passing of REG enum types directly
         if not isinstance(addr, REG) and hasattr(addr, "value"):
-            raise QDBBadAddr("Incorrect REG address on regWrite!")
+            raise QDBBadAddr("Incorrect REG address on regRead!")
         elif hasattr(addr, "value"):
             addr = addr.value
 
@@ -449,6 +444,7 @@ class qdb_interface(QObject):
         if hasattr(val, "value"):
             val = val.value
 
+        print(f"writing {val:02x} to addr: {addr:06x}")
         # form byte message
         args = ['QRW', addr, val]
         if isinstance(args, str): args = args.split(' ')
@@ -484,7 +480,7 @@ class qdb_interface(QObject):
         else:
             print("verification passed!")
             self.regWrite(REG.SCRATCH, self.version)
-        
+
         # set up SAQ register if version >= 8
         if self.version >= 8:
             addr = REG.SAQ(SAQReg.SAQ_FIFO_LNGTH)

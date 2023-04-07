@@ -360,7 +360,7 @@ begin
    generic map (
       X_NUM_G        => X_NUM_G,
       Y_NUM_G        => Y_NUM_G,
-      Version        => x"1000_003f",
+      Version        => x"2000_003f",
       N_SAQ_PORTS    => N_SAQ_PORTS,
       TIMESTAMP_BITS => TIMESTAMP_BITS
    )
@@ -538,7 +538,7 @@ begin
 --        cg5 := saqEnable = '1';
 --        cb5 := saqRst = '1';
 
-        cr5 := evtSize /= (others => '0');
+        cr5 := evtSize /= x"0000_0000";
         cg5 := s_daqRx = '1';
         cb5 := s_daqTx = '1';
               

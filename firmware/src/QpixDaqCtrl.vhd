@@ -172,26 +172,6 @@ begin
    uartFrameCnt <= daqFrameErrCnt;
    uartBreakCnt <= daqBreakErrCnt;
 
-   --QpixDummyTxRx_U : entity work.QpixDummyTxRx
-   --generic map (
-      --NUM_BITS_G => G_DATA_BITS
-   --)
-   --port map (
-      --clk         => clk,
-      --rst         => rst,
-
-      --txPort      => daqTx.Data,
-      --txValid     => daqTx.Valid,
-      --txByte      => daqTxByte, 
-      --txByteValid => daqTxByteValid, 
-      --txByteReady => daqTxByteReady,
-
-      --rxPort      => daqRx.Data,
-      --rxValid     => daqRx.Valid,
-      --rxByte      => daqRxByte,
-      --rxByteValid => daqRxByteValid
-   --);
-
    mem_U : entity work.bram_sdp_cc
    generic map (
       DATA     => daqRxByte'length + 64,
@@ -206,7 +186,7 @@ begin
       doutb => memData
    );
 
-   --memDataOut <= memData(31 downto 0) when memRdAddr(0) = '0' else memData(G_DATA_BITS-1 downto 32);
+   memEvtSize <= std_logic_vector(resize(unsigned(wrAddr),32));
    with memRdAddr(1 downto 0) select memDataOut <=
       memData(31 downto 0)  when b"00",
       memData(63 downto 32) when b"01",
@@ -214,7 +194,6 @@ begin
       memData(127 downto 96) when b"11",
       x"abadda7a" when others;
    
-  
    process (clk)
    begin
       if rising_edge (clk) then
@@ -240,46 +219,48 @@ begin
    ------------------------------------------------------------
    -- make a flag indicating that all ASICs have been read out
    ------------------------------------------------------------
-   process (clk)
-      variable qpix_data_v : QpixDataFormatType := QpixDataZero_C;
-      variable x : integer := 0;
-      variable y : integer := 0;
-   begin
-      if rising_edge (clk) then
-         case evt_state is 
-            when EVT_CTRL_IDLE => 
-               if trg = '1' then
-                  ro_finished <= '0';
-                  evt_state <= EVT_CTRL_RUNNING;
-                  asic_mask_evt <= (others => '0');
-               end if;
-            when EVT_CTRL_RUNNING => 
-               qpix_data_v := fQpixByteToRecord(daqRxByte); 
-               x := to_integer(unsigned(qpix_data_v.XPos));
-               y := to_integer(unsigned(qpix_data_v.YPos));
-               if daqRxByteValid = '1' then
-                  if qpix_data_v.WordType = G_WORD_TYPE_EVTEND then
-                     asic_mask_evt(x + y*3) <= '1';
-                     if asic_mask_evt(x + y*3) = '1' then
-                        -- rise some error flag TODO
-                     end if;
-                  end if;
-               end if;
+   -- process (clk)
+   --    variable qpix_data_v : QpixDataFormatType := QpixDataZero_C;
+   --    variable x : integer := 0;
+   --    variable y : integer := 0;
+   -- begin
+   --    if rising_edge (clk) then
 
-               if asic_mask_evt = asic_mask_fin then
-                  ro_finished <='1';
-                  evt_state   <= EVT_CTRL_IDLE;
-               end if;
+   --       case evt_state is
 
-         end case;
-         
-      end if;
-   end process;
+   --          when EVT_CTRL_IDLE =>
+   --             if trg = '1' then
+   --                ro_finished <= '0';
+   --                evt_state <= EVT_CTRL_RUNNING;
+   --                asic_mask_evt <= (others => '0');
+   --             end if;
 
-   evt_fin <= ro_finished;
+   --          when EVT_CTRL_RUNNING =>
+   --             qpix_data_v := fQpixByteToRecord(daqRxByte);
+   --             x := to_integer(unsigned(qpix_data_v.XPos));
+   --             y := to_integer(unsigned(qpix_data_v.YPos));
+   --             if daqRxByteValid = '1' then
+   --                if qpix_data_v.WordType = G_WORD_TYPE_EVTEND then
+   --                   asic_mask_evt(x + y*3) <= '1';
+   --                   if asic_mask_evt(x + y*3) = '1' then
+   --                      -- rise some error flag TODO
+   --                   end if;
+   --                end if;
+   --             end if;
+
+   --             if asic_mask_evt = asic_mask_fin then
+   --                ro_finished <='1';
+   --                evt_state   <= EVT_CTRL_IDLE;
+   --             end if;
+
+   --       end case;
+
+   --    end if;
+   -- end process;
+
+   -- evt_fin <= ro_finished;
    ------------------------------------------------------------
 
-   memEvtSize <= std_logic_vector(resize(unsigned(wrAddr),32));
 
    -- accept trigger and send interrogation
    process (clk)
@@ -289,7 +270,7 @@ begin
          r := QpixRegDataZero_C;
          if trg = '1' then
             r.Addr := toslv(1, G_REG_ADDR_BITS); 
-            r.Data := x"0001";
+            r.Data := asicData;
             r.OpWrite := '1';
             r.OpRead  := '0';
             r.ReqID   := asicReqID;
@@ -316,11 +297,5 @@ begin
          r_sig <= r;
       end if;
    end process;
-
-   --QpixDaqStorage_U : entity work.QpixDaqStorage_U
-   --port map(
-      --clk => clk,
-   --);
-
 
 end behav;

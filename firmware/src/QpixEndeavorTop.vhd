@@ -84,20 +84,19 @@ begin
          disable     => TxRxDisable,
          rxBusy      => rxBusy,
 
-         
-       -- Byte signal out
+         -- Byte signal out
          rxByte      => rxByte,      -- output
          rxByteValid => rxByteValid, -- output
+
          -- rxState     => rxState,     -- output
          rxByteAck   => rxByteAck,
          
-       -- Error statuses out
+         -- Error statuses out
          bitError    => rxFrameErr, -- output
          lenError    => rxBreakErr, -- output
          gapError    => rxGapErr,   -- output
 
          Rx          => Rx -- input
-
       );
    
    -- Transmit UART TX bytes
@@ -115,14 +114,15 @@ begin
          clk         => clk,
          sRst        => sRst,
          scale       => scale,
-         disable     => TxRxDisable, 
+         disable     => TxRxDisable,
+
          -- Ready to send new byte (data is sent on txByteValid AND txByteReady)
          txByteReady => txByteReady,
+
          -- Byte data to send out
          txByte      => txByte,
          txByteValid => txByteValid,
          tx          => Tx      
-
       );
 
 end Behavioral;

@@ -36,18 +36,18 @@ end QpixEndeavorTx;
 
 architecture Behavioral of QpixEndeavorTx is
 
-   signal zeroNum   : unsigned(7 downto 0) := (others => '0');
-   signal oneNum    : unsigned(7 downto 0) := (others => '0');
-   signal gapNum    : unsigned(7 downto 0) := (others => '0');
-   signal finNum    : unsigned(7 downto 0) := (others => '0');
+   -- signal zeroNum   : unsigned(7 downto 0) := (others => '0');
+   -- signal oneNum    : unsigned(7 downto 0) := (others => '0');
+   -- signal gapNum    : unsigned(7 downto 0) := (others => '0');
+   -- signal finNum    : unsigned(7 downto 0) := (others => '0');
 
-   signal scale0    : unsigned(7 downto 0);
-   signal scale1    : unsigned(7 downto 0);
-   signal scale15   : unsigned(7 downto 0);
-   signal scale2    : unsigned(7 downto 0);
-   signal scale3    : unsigned(7 downto 0);
-   signal scale4    : unsigned(7 downto 0);
-   signal scale8    : unsigned(7 downto 0);
+   -- signal scale0    : unsigned(7 downto 0);
+   -- signal scale1    : unsigned(7 downto 0);
+   -- signal scale15   : unsigned(7 downto 0);
+   -- signal scale2    : unsigned(7 downto 0);
+   -- signal scale3    : unsigned(7 downto 0);
+   -- signal scale4    : unsigned(7 downto 0);
+   -- signal scale8    : unsigned(7 downto 0);
 
 
    type StateType is (IDLE_S, DATA_S, GAP_S, FINISH_S);
@@ -79,28 +79,29 @@ architecture Behavioral of QpixEndeavorTx is
 
 begin
 
-   process (clk)
-   begin
-      if rising_edge(clk) then
-         scale0  <= RESIZE(unsigned(scale),scale0'length);
-         scale1  <= scale0; 
-         scale2  <= unsigned(scale0(scale0'left-1 downto 0)) & '0';
-         scale3  <= scale1 + scale2;
-         scale15 <= '0' & scale3(scale3'left downto 1);
-         scale4  <= scale0(scale0'left-2 downto 0) & B"00";
-         scale8  <= scale0(scale0'left-3 downto 0) & B"000";
+--   process (clk)
+--   begin
+--      if rising_edge(clk) then
+--         scale0  <= RESIZE(unsigned(scale),scale0'length);
+--         scale1  <= scale0; 
+--         scale2  <= unsigned(scale0(scale0'left-1 downto 0)) & '0';
+--         scale3  <= scale1 + scale2;
+--         scale15 <= '0' & scale3(scale3'left downto 1);
+--         scale4  <= scale0(scale0'left-2 downto 0) & B"00";
+--         scale8  <= scale0(scale0'left-3 downto 0) & B"000";
 
-         zeroNum <= to_unsigned(N_ZER_CLK_G-1, 7) + scale15; 
-         oneNum  <= to_unsigned(N_ONE_CLK_G-1, 7) + scale3;
-         gapNum  <= to_unsigned(N_GAP_CLK_G-1, 7) + scale15;
-         finNum  <= to_unsigned(N_FIN_CLK_G-1, 7) + scale8;
+--         zeroNum <= to_unsigned(N_ZER_CLK_G-1, 7) + scale15; 
+--         oneNum  <= to_unsigned(N_ONE_CLK_G-1, 7) + scale3;
+--         gapNum  <= to_unsigned(N_GAP_CLK_G-1, 7) + scale15;
+--         finNum  <= to_unsigned(N_FIN_CLK_G-1, 7) + scale8;
 
          
-      end if;
-   end process;
+--      end if;
+--   end process;
 
    -- Asynchronous state logic
-   process(curReg, txByteValid, txByte, zeroNum, oneNum, gapNum, finNum, disable) begin
+   -- process(curReg, txByteValid, txByte, zeroNum, oneNum, gapNum, finNum, disable) begin
+   process(curReg, txByteValid, txByte, disable) begin
       -- Set defaults
       nxtReg         <= curReg;
       nxtReg.ready   <= '0';
@@ -118,9 +119,9 @@ begin
                nxtReg.byte      <= txByte;
                nxtReg.state     <= DATA_S;
                if txByte(to_integer(curReg.counter)) = '1' then 
-                  nxtReg.phase_max <= oneNum;
+                  nxtReg.phase_max <= to_unsigned(N_ONE_CLK_G, 8);
                else
-                  nxtReg.phase_max <= zeroNum;
+                  nxtReg.phase_max <= to_unsigned(N_ZER_CLK_G, 8);
                end if;
             end if;
 
@@ -139,11 +140,11 @@ begin
 
          when GAP_S => 
             nxtReg.tx <= '0';
-            if to_integer(curReg.phase) = gapNum then
+            if to_integer(curReg.phase) = to_unsigned(N_GAP_CLK_G, 8) then
                if txByte(to_integer(curReg.counter)) = '1' then 
-                  nxtReg.phase_max <= oneNum;
+                  nxtReg.phase_max <= to_unsigned(N_ONE_CLK_G, 8);
                else
-                  nxtReg.phase_max <= zeroNum;
+                  nxtReg.phase_max <= to_unsigned(N_ZER_CLK_G, 8);
                end if;
                nxtReg.state      <= DATA_S;
                nxtReg.phase      <= (others => '0');
@@ -151,7 +152,7 @@ begin
 
          when FINISH_S  =>
             nxtReg.tx <= '0';
-            if to_integer(curReg.phase) = finNum then
+            if to_integer(curReg.phase) = to_unsigned(N_FIN_CLK_G, 8) then
                nxtReg.state <= IDLE_S;
             end if;
 

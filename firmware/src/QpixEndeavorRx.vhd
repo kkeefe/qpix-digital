@@ -77,19 +77,19 @@ architecture behavioral of qpixendeavorrx is
     disable   => '0'
   );
 
-  signal zeromax : unsigned(7 downto 0) := (others => '0');
-  signal zeromin : unsigned(7 downto 0) := (others => '0');
-  signal onemax  : unsigned(7 downto 0) := (others => '0');
-  signal onemin  : unsigned(7 downto 0) := (others => '0');
-  signal gapmax  : unsigned(7 downto 0) := (others => '0');
-  signal gapmin  : unsigned(7 downto 0) := (others => '0');
-  signal finmin  : unsigned(7 downto 0) := (others => '0');
+  -- signal zeromax : unsigned(7 downto 0) := (others => '0');
+  -- signal zeromin : unsigned(7 downto 0) := (others => '0');
+  -- signal onemax  : unsigned(7 downto 0) := (others => '0');
+  -- signal onemin  : unsigned(7 downto 0) := (others => '0');
+  -- signal gapmax  : unsigned(7 downto 0) := (others => '0');
+  -- signal gapmin  : unsigned(7 downto 0) := (others => '0');
+  -- signal finmin  : unsigned(7 downto 0) := (others => '0');
 
-  signal scale0 : unsigned(7 downto 0);
-  signal scale1 : unsigned(7 downto 0);
-  signal scale2 : unsigned(7 downto 0);
-  signal scale4 : unsigned(7 downto 0);
-  signal scale8 : unsigned(7 downto 0);
+  -- signal scale0 : unsigned(7 downto 0);
+  -- signal scale1 : unsigned(7 downto 0);
+  -- signal scale2 : unsigned(7 downto 0);
+  -- signal scale4 : unsigned(7 downto 0);
+  -- signal scale8 : unsigned(7 downto 0);
 
   signal curreg : regtype := reg_init_c;
   signal nxtreg : regtype := reg_init_c;
@@ -112,26 +112,26 @@ begin
 
   rxerror <= curReg.bitError or curReg.gapError or curReg.lenError;
 
-  process (clk) is
-  begin
+  -- process (clk) is
+  -- begin
 
-    if rising_edge(clk) then
-      scale0 <= RESIZE(unsigned(scale), scale0'length);
-      scale1 <= scale0;
-      scale2 <= unsigned(scale0(scale0'left-1 downto 0)) & '0';
-      scale4 <= scale0(scale0'left-2 downto 0) & B"00";
-      scale8 <= scale0(scale0'left-3 downto 0) & B"000";
+  --   if rising_edge(clk) then
+  --     scale0 <= RESIZE(unsigned(scale), scale0'length);
+  --     scale1 <= scale0;
+  --     scale2 <= unsigned(scale0(scale0'left-1 downto 0)) & '0';
+  --     scale4 <= scale0(scale0'left-2 downto 0) & B"00";
+  --     scale8 <= scale0(scale0'left-3 downto 0) & B"000";
 
-      zeromin <= to_unsigned(n_zer_min_g, 7) + scale1;
-      zeromax <= to_unsigned(n_zer_max_g, 7) + scale2;
-      onemin  <= to_unsigned(n_one_min_g, 7) + scale2;
-      onemax  <= to_unsigned(n_one_max_g, 7) + scale4;
-      gapmin  <= to_unsigned(n_gap_min_g, 7) + scale1;
-      gapmax  <= to_unsigned(n_gap_max_g, 7) + scale2;
-      finmin  <= to_unsigned(n_fin_min_g, 7) + scale8;
-    end if;
+  --     zeromin <= to_unsigned(n_zer_min_g, 7) + scale1;
+  --     zeromax <= to_unsigned(n_zer_max_g, 7) + scale2;
+  --     onemin  <= to_unsigned(n_one_min_g, 7) + scale2;
+  --     onemax  <= to_unsigned(n_one_max_g, 7) + scale4;
+  --     gapmin  <= to_unsigned(n_gap_min_g, 7) + scale1;
+  --     gapmax  <= to_unsigned(n_gap_max_g, 7) + scale2;
+  --     finmin  <= to_unsigned(n_fin_min_g, 7) + scale8;
+  --   end if;
 
-  end process;
+  -- end process;
 
   process (clk) is
   begin
@@ -145,7 +145,8 @@ begin
   rx_r <= rx_q(3);
 
   -- Asynchronous state logic
-  process (curreg, rx_r, rxbyteack, zeromin, zeromax, onemin, onemax, gapmin, finmin, disable) is
+  -- process (curreg, rx_r, rxbyteack, zeromin, zeromax, onemin, onemax, gapmin, finmin, disable) is
+  process (curreg, rx_r, rxbyteack, disable) is
   begin
 
     -- Set defaults
@@ -185,17 +186,17 @@ begin
           nxtReg.state <= BIT_S;
         end if;
 
-        if (curReg.highCnt > onemax) then
+        if (curReg.highCnt > to_unsigned(N_ONE_MAX_G, 8)) then
           nxtReg.bitError <= '1';
           nxtReg.state    <= WAIT_FINISH_S;
         end if;
 
       when BIT_S =>
 
-        if (curReg.highCnt >= zeromin and curReg.highCnt <= zeromax) then
+        if (curReg.highCnt >= to_unsigned(N_ZER_MIN_G, 8) and curReg.highCnt <= to_unsigned(N_ZER_MAX_G, 8)) then
           nxtReg.byte(to_integer(curReg.byteCount)) <= '0';
           nxtReg.state                              <= GAP_S;
-        elsif (curReg.highCnt >= onemin and curReg.highCnt <= onemax) then
+        elsif (curReg.highCnt >= to_unsigned(N_ONE_MIN_G, 8) and curReg.highCnt <= to_unsigned(N_ONE_MAX_G, 8)) then
           nxtReg.byte(to_integer(curReg.byteCount)) <= '1';
           nxtReg.state                              <= GAP_S;
         else
@@ -210,12 +211,12 @@ begin
 
       when GAP_S =>
 
-        if (curReg.lowCnt >= finmin) then
+        if (curReg.lowCnt >= to_unsigned(N_FIN_MIN_G, 8)) then
           nxtReg.state <= FINISH_S;
         end if;
 
         if (rx_r = '1') then
-          if (curReg.lowCnt >= gapmin) then
+          if (curReg.lowCnt >= to_unsigned(N_GAP_MIN_G, 8)) then
             -- more bytes have been received than expected
             if (curReg.byteCount = num_bits_g) then
               nxtReg.lenError <= '1';
@@ -251,7 +252,7 @@ begin
           nxtReg.waitCnt <= (others => '0');
         end if;
 
-        if (curReg.waitCnt >= finmin) then
+        if (curReg.waitCnt >= to_unsigned(N_FIN_MIN_G, 8)) then
           nxtReg.state <= IDLE_S;
         end if;
 

@@ -131,8 +131,8 @@ begin
                
                when REGMAP_CMD     =>
                   if wen = '1' and req = '1' and ack = '0' then
-                     trg <= wdata(0);
-                     swRst <= wdata(1);
+                     trg <= wdata(0) or wdata(1);
+                     swRst <= wdata(2);
                   end if;
                
                when REGMAP_STATUS    =>
@@ -306,6 +306,7 @@ begin
          elsif s_addr(21 downto 18) = x"3" then
             ack         <= req;
             rdata       <= x"aaaa_bbbb";
+            -- pulse the asic
             if req = '1' and ack = '0' then
                asicReq     <= '1';
                asicOpWrite <= wen;
