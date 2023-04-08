@@ -388,9 +388,10 @@ class QpixAsicArray():
       RouteState  - string or None type member to define current routing method of Array
       push_state  - enable flag that is sent to ASICs within the array enabling push
       seed        - seed value to send to random module
+      offset      - float value to set to injected hits method
     """
     def __init__(self, nrows, ncols, nPixs=16, fNominal=30e6, pctSpread=0.05, deltaT=1e-5, timeEpsilon=1e-6,
-                 timeout=1.5e4, hitsPerSec = 20./1., debug=0.0, tiledf=None, seed=2):
+                 timeout=1.5e4, hitsPerSec = 20./1., debug=0.0, tiledf=None, seed=2, offset=None):
 
         # if we have a tiledf to construct an array, then the size is determined by the tile
         if tiledf is not None:
@@ -436,7 +437,7 @@ class QpixAsicArray():
 
         # load in hits if we're creating an array based on tiledf data
         if tiledf is not None:
-            self._InjectHits(tiledf["hits"])
+            self._InjectHits(tiledf["hits"], offset=offset)
    
     def __iter__(self):
         '''returns iterable through the asics within the array'''
@@ -792,7 +793,7 @@ class QpixAsicArray():
         else:
             print("WARNING: unknown route state passed!", self.RouteState)
 
-    def _InjectHits(self, dataframeHits):
+    def _InjectHits(self, dataframeHits, offset=None):
         """
         InjectHits reads in output from tiledf created in radiogenicNB.ipynb. 
         Values that are read in
@@ -803,11 +804,20 @@ class QpixAsicArray():
                     asicX  :int
                     asicY  :int
                     resets :list (time, channel)
+            offset - time, of when to set the earliest injected reset value to
         """
         # store the asic times into the correct asic
         for asicX, asicY, resets in dataframeHits:
+
+            if asicX >= self._nrows or asicY >= self._ncols:
+                continue
+
             times = np.asarray([time for time, _ in resets])
             channels = np.asarray([int(channel) for _, channel in resets])
+
+            if offset is not None:
+                times = times + offset
+
             self._asics[asicX][asicY].InjectHits(times, channels)
 
             # the total injected is equal to the final amount of times

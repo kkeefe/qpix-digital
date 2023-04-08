@@ -4,8 +4,9 @@ from QpixAsicArray import PrintTransactMap
 from QpixAsic import QPFifo
 import pandas as pd
 
-## This Script reads in the output of radiogenicNB.ipynb (which reads in output from radiogenic ROOT data)
-## and then executes a parameter space search utilizing multiprocessing to speed things up
+## This Script reads in the output of radiogenicNB.ipynb (which reads in output
+## from radiogenic ROOT data) and then executes a parameter space search
+## utilizing multiprocessing to speed things up
 
 MAXTIME = 10 # time to integrate for, or time radiogenic data is based on
 
