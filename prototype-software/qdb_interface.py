@@ -76,13 +76,14 @@ class AsicREG(Enum):
     These address spaces are defined in QpixRegFile.vhd, within case selection.
     """
     CMD = 1
-    TIMEOUT = 2
+    TIMESTAMP = 2
     DIRMASK = 3
     CHMASK = 4
     COORDINATE = 5
     TXRX_DISABLE = 6
     LOC_DISABLE = 7
     INT_NUMBER = 8
+    SCRATCH = 9
 
 
 class SAQReg(Enum):
@@ -143,7 +144,7 @@ def FIFOAddr(ix, iy):
 
     return val << 2
 
-def AsicAddr(xpos=0, ypos=0, remote_addr=AsicREG.CMD):
+def AsicAddr(xpos=0, ypos=0, remote_addr=AsicREG.CMD, broadcast=True):
     """
     return address space for remote ASIC.
 
@@ -157,8 +158,7 @@ def AsicAddr(xpos=0, ypos=0, remote_addr=AsicREG.CMD):
         # QpixDaqCtrl.vhd selects these address spaces:
         xp = ((xpos & 0b111)<<6)
         yp = ((ypos & 0b111)<<3)
-        # dest_flag = 1 << 9
-        dest_flag = 0
+        dest_flag = 1 << 9 if broadcast else 0
 
         # this address flag is defined within QpixProtoRegMap.vhd
         asic_addr_flag = 3 << 16
@@ -444,7 +444,7 @@ class qdb_interface(QObject):
         if hasattr(val, "value"):
             val = val.value
 
-        print(f"writing {val:02x} to addr: {addr:06x}")
+        # print(f"writing {val:02x} to addr: {addr:06x}")
         # form byte message
         args = ['QRW', addr, val]
         if isinstance(args, str): args = args.split(' ')

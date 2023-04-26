@@ -7,7 +7,7 @@ import time
 
 # PyQt GUI things
 from PyQt5 import QtCore
-from PyQt5.QtWidgets import (QWidget, QPushButton, QCheckBox, QSpinBox, QLabel,
+from PyQt5.QtWidgets import (QWidget, QPushButton, QCheckBox, QComboBox, QSpinBox, QLabel,
                              QDoubleSpinBox, QProgressBar, QTabWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QStatusBar,
                              QDialog, QDialogButtonBox, QLCDNumber, QFileDialog)
 from PyQt5.QtCore import QProcess, QTimer, pyqtSignal
@@ -75,6 +75,7 @@ class QPIX_GUI(QMainWindow):
         # IO interfaces
         self.qpi = qdb_interface()
         self.close_udp.connect(self.qpi.finish) # closes udp worker thread
+
         self._tf = ROOT.TFile("./test.root", "RECREATE")
         self._tt = ROOT.TTree("qdbData", "data_tree")
         self._saqMask = 0xffff # default everything is on
@@ -110,8 +111,8 @@ class QPIX_GUI(QMainWindow):
 
         # create the layouts that are needed for making the GUI pretty
         self.tabW = QTabWidget()
-        self.tabW.addTab(self._makeSAQlayout(), "SAQ")
         self.tabW.addTab(self._makeQDBlayout(), "QDB")
+        self.tabW.addTab(self._makeSAQlayout(), "SAQ")
         self.setCentralWidget(self.tabW)
 
         # show the main window
@@ -127,11 +128,11 @@ class QPIX_GUI(QMainWindow):
         layout = QGridLayout()
 
         # progress tracker
-        pbar = QProgressBar()
-        pbar.setRange(0, 100)
-        pbar.setValue(0)
-        layout.addWidget(pbar, 2, 2)
-        self._progBar = pbar
+        # pbar = QProgressBar()
+        # pbar.setRange(0, 100)
+        # pbar.setValue(0)
+        # layout.addWidget(pbar, 2, 2)
+        # self._progBar = pbar
 
         btn_init = QPushButton()
         btn_init.setText('initialize')
@@ -165,8 +166,8 @@ class QPIX_GUI(QMainWindow):
 
         ## ASIC commands ##
         btn_rst = QPushButton()
-        btn_rst.setText('reset')
-        btn_rst.clicked.connect(self.resetAsic)
+        btn_rst.setText('reset state')
+        btn_rst.clicked.connect(self.resetAsicState)
         layout.addWidget(btn_rst, 1, 1)
 
         btn_mask = QPushButton()
@@ -184,45 +185,93 @@ class QPIX_GUI(QMainWindow):
         btn_writeReg.clicked.connect(self.writeReg)
         layout.addWidget(btn_writeReg, 1, 4)
 
-        # self.chk_enable = QCheckBox()
-        # self.chk_enable.setText('asic route')
-        # self.chk_enable.setCheckState(0)
-        # self.chk_enable.stateChanged.connect(self.routeAsic)
-        # layout.addWidget(self.chk_enable, 0, 5)
+        self.s_boxASICcol = QSpinBox()
+        self.s_boxASICcol.setRange(0, 4)
+        self.s_boxASICcol.setValue(0)
+        layout.addWidget(self.s_boxASICcol, 2, 0)
 
-        ##  Int Containers  ###
-        sBox = QSpinBox()
+        self.s_boxASICrow = QSpinBox()
+        self.s_boxASICrow.setRange(0, 4)
+        self.s_boxASICrow.setValue(0)
+        layout.addWidget(self.s_boxASICrow, 2, 1)
+
+        self.cBox = QCheckBox("Broadcast")
+        layout.addWidget(self.cBox, 2, 2)
+
+        sBox = QComboBox()
+        sBox.addItems([asic.name for asic in AsicREG])
         self.sBox = sBox
-        sBox.setValue(42)
-        sBox.setRange(0, 1<<18)
-        layout.addWidget(sBox, 3, 0)
-        # lsBox = QLabel()
-        # lsBox.setText("N-Integrations")
+        self.sBox.setCurrentIndex(2)
+        layout.addWidget(sBox, 2, 3)
 
-        self.sBoxOffset = QSpinBox()
-        self.sBoxOffset.setValue(16)
-        self.sBoxOffset.setRange(14, 18)
-        layout.addWidget(self.sBoxOffset, 3, 1)
-        # lsBox = QLabel()
-        # lsBox.setText("Frq Start (Hz)")
-
-        self.sBoxOffsetVal = QSpinBox()
-        self.sBoxOffsetVal.move(240,80)
-        self.sBoxOffsetVal.setValue(420)
-        self.sBoxOffsetVal.setRange(0, 3)
-        layout.addWidget(self.sBoxOffsetVal, 3, 2)
-        # lsBox = QLabel()
-        # lsBox.setText("Frq Stop (Hz)")
-        # lsBox.move(310, 85)
-
+        # val to write
         self.s_boxWrite = QSpinBox()
         self.s_boxWrite.move(240,120)
-        self.s_boxWrite.setValue(0)
+        self.s_boxWrite.setValue(18)
         self.s_boxWrite.setRange(0, 100)
-        layout.addWidget(self.s_boxWrite, 3, 3)
+        layout.addWidget(self.s_boxWrite, 2, 4)
+
+        # event memory probes
+        self.cBoxProbe = QCheckBox("Probe")
+        layout.addWidget(self.cBoxProbe, 3, 2)
+        self.cBoxProbe.clicked.connect(self.probe_evtMem)
+        self._probeTimer = QTimer()
+        self._probeTimer.setInterval(250)
+        self._probeTimer.timeout.connect(self.probe_evt)
+        self.nProbes = 0
+        self.nErrors = 0
+
+        btn_readEvtMem = QPushButton()
+        btn_readEvtMem.setText('read evt mem')
+        btn_readEvtMem.clicked.connect(self.readEvtMem)
+        layout.addWidget(btn_readEvtMem, 3, 4)
+
+        self.s_boxEvtMem = QSpinBox()
+        self.s_boxEvtMem.setValue(0)
+        self.s_boxEvtMem.setRange(0, 100)
+        layout.addWidget(self.s_boxEvtMem, 3, 3)
 
         self._qdbPage.setLayout(layout)
         return self._qdbPage
+
+    def probe_evt(self):
+        """
+        write random mask to the channel mask of the adjacent node.
+        read this number back.
+        keep track of any errors
+        """
+        self.nProbes += 1
+        addr = 0x30204
+        randMask = np.random.randint(0xffff)
+        xdest = self.s_boxASICcol.value()
+        ydest = self.s_boxASICrow.value()
+        addr = addr + (xdest << 6) + (ydest << 3)
+        self.qpi.regWrite(addr, randMask)
+        time.sleep(0.025)
+        self.qpi.regRead(addr)
+        time.sleep(0.025)
+        word0 = self.qpi.regRead(REG.MEM(0, 0))
+        word1 = self.qpi.regRead(REG.MEM(0, 1))
+
+        data = word0 & 0xffff
+        wordType = (word1>>24) & 0xf
+        if wordType != 4:
+            print(f"word type error: {wordType} != 4")
+            self.nErrors += 1
+        elif data != randMask:
+            print(f"mask error: {data} != {randMask}")
+            self.nErrors += 1
+
+    def probe_evtMem(self):
+        if self.cBoxProbe.isChecked():
+            print("running probe")
+            self._probeTimer.start()
+        else:
+            print("probe complete")
+            print(f"probe encountered {self.nErrors} errors out of {self.nProbes} probes.")
+            self._probeTimer.stop()
+            self.nErrors = 0
+            self.nProbes = 0
 
     def _makeSAQlayout(self):
         """
@@ -336,28 +385,51 @@ class QPIX_GUI(QMainWindow):
         """
         main working function which provides a one-click setup
 
-        to initialze the array. Current implementation of the hdl
-        in the lattice chips require a reset, and non-default routing
+        initialization should cause an ResetRoute on all asics,
+        assign the correct manual routing for all ASICs in the tile
+        and properly configure the xpos on all ASICs as well.
         """
         # currently only one ASIC connected to the zybo which should be
         # pointed downwards
-        self.resetAsic(0,0)
-        self.setAsicDirMask(0,0, AsicMask.DirDown)
+        self.cBox.setChecked(True)
+        self.resetAsicState()
+        self.setAsicDirMask(0,0, AsicMask.DirRight)
 
     def readReg(self):
-        val = self.sBox.value()
-        offset = self.sBoxOffsetVal.value() << self.sBoxOffset.value()
-        val += offset
-        print(f"reading reg: 0x{val:06x}")
-        readVal = self.qpi.regRead(val)
-        print(f"read from reg: 0x{readVal:08x}")
+        """
+        read a specific asic reg
+        """
+        dest_flag = 1 << 9 if not self.cBox.isChecked() else 0
+        addr = self.sBox.currentIndex() + 1
+        offset = 3 << 16
+        addr += offset
+        addr += dest_flag
+        if dest_flag != 0:
+            xdest = self.s_boxASICcol.value()
+            ydest = self.s_boxASICrow.value()
+            addr = addr + (xdest << 6) + (ydest << 3)
+            print(f"reading ASIC ({xdest},{ydest}) reg: 0x{addr:06x}")
+        else:
+            print(f"reading reg: 0x{addr:06x}")
+        readVal = self.qpi.regRead(addr)
 
     def writeReg(self):
-        addr = self.sBox.value()
-        offset = self.sBoxOffsetVal.value() << self.sBoxOffset.value()
+        """
+        write a specific asic reg
+        """
+        dest_flag = 1 << 9 if not self.cBox.isChecked() else 0
+        addr = self.sBox.currentIndex() + 1
+        offset = 3 << 16
         addr += offset
+        addr += dest_flag
+        if dest_flag != 0:
+            xdest = self.s_boxASICcol.value()
+            ydest = self.s_boxASICrow.value()
+            addr = addr + (xdest << 6) + (ydest << 3)
+            print(f"writing ASIC ({xdest},{ydest}) reg: 0x{addr:06x}")
+        else:
+            print(f"writing reg: 0x{addr:08x}")
         val = self.s_boxWrite.value()
-        print(f"writing reg: 0x{addr:06x} with val: 0x{val:02x}")
         self.qpi.regWrite(addr, val)
 
     def trigger(self):
@@ -367,10 +439,69 @@ class QPIX_GUI(QMainWindow):
         This interrogation will be sent to all ASICs in the array, and memory
         will be recorded into the BRAM within QpixDaqCtrl.vhd.
         """
-        addr = REG.CMD
         val = AsicCMD.HardInterrogation
-        self.readEvents()
+        addr = 0x30001
         wrote = self.qpi.regWrite(addr, val)
+        time.sleep(0.025)
+        self.readEvents()
+
+    def readEvtMem(self) -> int:
+        """
+        probe read event for debugging read a specific memory location pointed
+        to by the spin box.
+        print all 3 32 bit words in hex to console
+        """
+        evt = self.s_boxEvtMem.value()
+        word0 = self.qpi.regRead(REG.MEM(evt, 0))
+        word1 = self.qpi.regRead(REG.MEM(evt, 1))
+        word2 = self.qpi.regRead(REG.MEM(evt, 2))
+
+        # word one parts
+
+        # word two parts
+        wordType = (word1>>24) & 0xf
+        if wordType == 4: # regresp
+            data = word0 & 0xffff
+            addr = (word0 >> 16) & 0xffff
+            ydest    = word1 & 0xf
+            xdest    = (word1>>4) & 0xf
+            yhops    = (word1>>8) & 0xf
+            xhops    = (word1>>12) & 0xf
+            srcDaq   = (word1>>16) & 0x1
+            reqID    = (word1>>17) & 0xf
+            dest     = (word1>>21) & 0x1
+            opRead   = (word1>>22) & 0x1
+            opWrite  = (word1>>23) & 0x1
+            print(f"REG_RESP: 0x{word0:08x}: data=0x{data:04x}, addr=0x{addr:04x}")
+            print(f"ydest: {ydest}", end=" ")
+            print(f"xdest: {xdest}", end=" ")
+            print(f"yhops: {yhops}", end=" ")
+            print(f"xhops: {xhops}", end=" ")
+            print(f"srcDaq: {srcDaq}", end=" ")
+            print(f"reqID: {reqID}", end=" ")
+            print(f"dest: {dest}", end=" ")
+            print(f"opRead: {opRead}", end=" ")
+            print(f"opWrite: {opWrite}", end=" ")
+            print(f"wordType: {wordType}")
+
+        else: # datawords
+            timestamp = word0 & 0xffff_ffff
+            ypos = (word1) & 0xf
+            xpos = (word1>>4) & 0xf
+            chanMask = (word1>>8) & 0xffff
+            intrNum = chanMask & 0x01ff
+            locFull = bool(chanMask & 0x4000)
+            extFull = bool(chanMask & 0x2000)
+            reqID = (chanMask >> 9) & 0xf
+            daq_timestamp = word2 & 0xffff_ffff
+            if wordType == 5:
+                print(f"EVT_END @ 0x{timestamp:08x}: ({xpos},{ypos})", end="" )
+                print(f" - 0x{daq_timestamp:08x}, locFull={locFull}, extFull={extFull}", end=" ")
+                print(f", reqID={reqID}")
+            elif wordType != 0:
+                print(f"word type={wordType} recv: {timestamp}, ({xpos},{ypos})")
+            else:
+                print(f"null word:: 0x{word0:08x} | 0x{word1:08x}")
 
     def readEvents(self) -> int:
         """
@@ -422,7 +553,7 @@ class QPIX_GUI(QMainWindow):
             return y, x, chanMask, wordType
 
         # keep track of the readback progress..
-        self._progBar.setRange(0, evts)
+        # self._progBar.setRange(0, evts)
 
         # read back all of the events now, and each event has 32*3 bits..
         for evt in range(evts):
@@ -431,7 +562,7 @@ class QPIX_GUI(QMainWindow):
             d = self.qpi.regRead(REG.MEM(evt, 1))
             y, x, chanMask, wordType = getMeta(d)
             daqTime = self.qpi.regRead(REG.MEM(evt, 2))
-            self._progBar.setValue(evt+1)
+            # self._progBar.setValue(evt+1)
 
             # store and fill each event into the tree, writing when done
             self._data["daqT"][0] = daqTime
@@ -487,11 +618,11 @@ class QPIX_GUI(QMainWindow):
         daq_cnt = daq_trig_end - daq_trig_start
         dt = time_e - time_s
         fdaq = (daq_cnt / dt)
-        print(f"Daq Frq: {fdaq/1e6:0.4f} MHz")
+        print(f"Daq Frq: {fdaq/1e6:0.4f} MHz, cnts: {daq_trig_end:08x} - {daq_trig_start:08x}")
 
         asic_cnt = asic_time_e - asic_time_s
         fasic = fdaq * (asic_cnt / daq_cnt)
-        print(f"ASIC Frq: {fasic/1e6:0.4f} MHz")
+        print(f"ASIC Frq: {fasic/1e6:0.4f} MHz, cnts: {asic_time_e:08x} - {asic_time_s:08x}")
 
         # calculate running differences
         # current test 7/25: Diff Frq: 0.0859 +/- 0.0038 MHz
@@ -544,12 +675,12 @@ class QPIX_GUI(QMainWindow):
     ############################
     ## ASIC specific Commands ##
     ############################
-    def resetAsic(self, xpos=0, ypos=0):
+    def resetAsicState(self, xpos=0, ypos=0):
         """
         Reset asic at position (xpos, ypos)
         """
-        addr = REG.ASIC(xpos, ypos, AsicREG.CMD)
-        val = AsicCMD.ResetAsic
+        addr = REG.ASIC(xpos, ypos, AsicREG.CMD, broadcast=not self.cBox.isChecked())
+        val = AsicCMD.ResetState
         self.qpi.regWrite(addr, val)
 
 
@@ -560,50 +691,28 @@ class QPIX_GUI(QMainWindow):
         if not isinstance(mask, AsicMask):
             raise QDBBadAddr("Incorrect AsicMask!")
 
-        addr = REG.ASIC(xpos, ypos, AsicREG.DIRMASK)
-        val = mask
+        addr = REG.ASIC(xpos, ypos, AsicREG.DIRMASK, broadcast=not self.cBox.isChecked())
+        val = mask.value
+        print(f"writing reg: 0x{addr:06x} with val: 0x{val:02x}")
         self.qpi.regWrite(addr, val)
-
-    def setAsicTimeout(self, xpos=0, ypos=0, timeout=15000):
-        """
-        Change ASIC timeout value at position (xpos, ypos)
-        """
-        addr = REG.ASIC(xpos, ypos, AsicREG.TIMEOUT)
-        val = timeout
-        self.qpi.regWrite(addr, val)
-
-    def getAsicTimeout(self, xpos=0, ypos=0):
-        """
-        Change ASIC timeout value at position (xpos, ypos)
-        """
-        addr = REG.ASIC(xpos, ypos, AsicREG.TIMEOUT)
-        read = self.qpi.regRead(addr)
-        x, y, wordType, addr, asicTimeout = self._readAsicTimeout()
-
-        if x != xpos or y != ypos:
-            print(f"Timeout WARNING: Read ({x}, {y}) instead of ({xpos},{ypos})")
-
-        return asicTimeout
 
     def getAsicTime(self, xpos=0, ypos=0):
         """
         wrapper function for reading clkCnt register within QDBAsic, as defined
         in QPixRegFile.vhd
         """
-        addr = REG.ASIC(xpos, ypos, AsicREG.CAL)
+        addr = REG.ASIC(xpos, ypos, AsicREG.TIMESTAMP, broadcast=not self.cBox.isChecked())
         read = self.qpi.regRead(addr)
         x, y, wordType, timestamp = self._readAsicTime()
 
         if x != xpos or y != ypos:
-            print(f"CAL WARNING: Read ({x}, {y}) instead of ({xpos},{ypos})")
+            print(f"CAL WARNING: Read ({x}, {y}) instead of ({xpos},{ypos}) type: {wordType}")
 
         return timestamp
 
     def _readAsicTime(self):
         """
-        helper function to parse data from the asic cal as stored in RegFile.vhd.
-
-        This method is similar to _readAsicTimeout.
+        helper function to parse data from the asic word as stored in RegFile.vhd.
         """
 
         # this register stores the whole stamp in the bottom 32 bits
@@ -611,6 +720,7 @@ class QPIX_GUI(QMainWindow):
 
         # next 32 bits
         word2 = self.qpi.regRead(REG.MEM(0, 1))
+
         y = word2 & 0xf
         x = (word2 >> 4) & 0xf
         wordType = (word2 >> 24) & 0xf
@@ -785,12 +895,14 @@ class QPIX_GUI(QMainWindow):
         hits = self.qpi.regRead(addr)
         return hits
 
+
     def getDMARegisters(self):
         """
         Print the DMA register status, connected to a button
         """
         print("printing DMA Registers:")
         self.qpi.PrintDMA()
+
 
     def resetDMA(self):
         """
@@ -799,32 +911,6 @@ class QPIX_GUI(QMainWindow):
         print("reseting the DMA!")
         self.qpi._resetDMA()
 
-    def _readAsicTimeout(self):
-        """
-        special helper function to unpack ASIC request word from BRAM memory.
-
-        Layering of ASIC data is stored within QpixPkg.vhd, fQpixRegToByte function.
-        """
-        # NOTE: A request data from an asic resets MEM addr,
-        # and that the MEM addr goes back to zero..
-        word1 = self.qpi.regRead(REG.MEM(0, 0))
-        word2 = self.qpi.regRead(REG.MEM(0, 1))
-
-        # records when byte was received, and not related to ASIC cal request
-        # daqTime = self.qpi.regRead(REG.MEM(0, 2))
-
-        # first 32 bits
-        timeout = word1 & 0xffff
-        addr = (word1 >> 16) & 0xffff
-
-        # next 32 bits
-        y = word2 & 0xf
-        x = (word2 >> 4) & 0xf
-        wordType = (word2 >> 24) & 0xf
-
-        print(f"Read x{wordType:01x} ASIC @ {addr:04x} timeout: 0x{timeout:04x}-{timeout}")
-
-        return x, y, wordType, addr, timeout
 
     def launchSaqDialog(self):
         """
@@ -832,6 +918,7 @@ class QPIX_GUI(QMainWindow):
         returns a new mask value to send to SAQ trigger register bits.
         """
         self._mask = 0x0
+
 
     def SaveData(self, output_file=None):
         """
