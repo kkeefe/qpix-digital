@@ -92,8 +92,10 @@ class QPIX_GUI(QMainWindow):
             "asicT" : array('L', [0]),
             "asicX" : array('H', [0]),
             "asicY" : array('H', [0]),
+            "asicY" : array('H', [0]),
+            "Mask" : array('H', [0]),
             "wordType" : array('H', [0])}
-        types = ["trgT/i", "daqT/i", "asicT/i", "asicX/b", "asicY/b", "wordType/b"]
+        types = ["trgT/i", "daqT/i", "asicT/i", "asicX/b", "asicY/b", "mask/s", "wordType/b"]
         for data, typ in zip(self._data.items(), types):
             self._tt.Branch(data[0], data[1], typ)
 
@@ -141,7 +143,7 @@ class QPIX_GUI(QMainWindow):
 
         btn = QPushButton()
         btn.setText('trigger')
-        btn.clicked.connect(self.trigger)
+        btn.clicked.connect(lambda: self.trigger(hard=True))
         layout.addWidget(btn, 0, 1)
 
         btn_readEvents = QPushButton()
@@ -211,6 +213,16 @@ class QPIX_GUI(QMainWindow):
         self.s_boxWrite.setRange(0, 100)
         layout.addWidget(self.s_boxWrite, 2, 4)
 
+        # soft-trigger + hard trigger acquire
+        self.cBoxAcquire = QCheckBox("Acquire")
+        layout.addWidget(self.cBoxAcquire, 3, 1)
+        self.cBoxAcquire.clicked.connect(self.Acquire_evtMem)
+        self._AcquireTimer = QTimer()
+        self._AcquireTimer.setInterval(500)
+        self._AcquireTimer.timeout.connect(self.Acquire_evt)
+        self.nAcquireErrors = 0
+        self.nAcquires = 0
+
         # event memory probes
         self.cBoxProbe = QCheckBox("Probe")
         layout.addWidget(self.cBoxProbe, 3, 2)
@@ -233,6 +245,18 @@ class QPIX_GUI(QMainWindow):
 
         self._qdbPage.setLayout(layout)
         return self._qdbPage
+
+    def Acquire_evt(self):
+        """
+        write random mask to the channel mask of the adjacent node.
+        read this number back.
+        keep track of any errors
+        """
+        self.nAcquires += 1
+        if self.nAcquires % 20 == 0:
+            self.trigger()
+        else:
+            self.trigger(hard=False)
 
     def probe_evt(self):
         """
@@ -272,6 +296,17 @@ class QPIX_GUI(QMainWindow):
             self._probeTimer.stop()
             self.nErrors = 0
             self.nProbes = 0
+
+    def Acquire_evtMem(self):
+        if self.cBoxAcquire.isChecked():
+            print("running Acquire")
+            self._AcquireTimer.start()
+        else:
+            print("Acquire complete")
+            print(f"Acquire encountered {self.nAcquireErrors} errors out of {self.nAcquires} Acquires.")
+            self._AcquireTimer.stop()
+            self.nAcquireErrors = 0
+            self.nAcquires = 0
 
     def _makeSAQlayout(self):
         """
@@ -389,11 +424,19 @@ class QPIX_GUI(QMainWindow):
         assign the correct manual routing for all ASICs in the tile
         and properly configure the xpos on all ASICs as well.
         """
-        # currently only one ASIC connected to the zybo which should be
-        # pointed downwards
+        # broadcast a reset
         self.cBox.setChecked(True)
         self.resetAsicState()
-        self.setAsicDirMask(0,0, AsicMask.DirRight)
+
+        # iterate through possible ASICs, setting a configurable routing
+        self.cBox.setChecked(False)
+        for row in range(2):
+            for col in range(2):
+                if row == 0 and col != 0:
+                    adir = AsicMask.DirUp
+                else:
+                    adir = AsicMask.DirRight
+                self.setAsicDirMask(row, col, adir)
 
     def readReg(self):
         """
@@ -432,17 +475,20 @@ class QPIX_GUI(QMainWindow):
         val = self.s_boxWrite.value()
         self.qpi.regWrite(addr, val)
 
-    def trigger(self):
+    def trigger(self, hard=True):
         """
         Send a basic trigger packet to the board.
 
         This interrogation will be sent to all ASICs in the array, and memory
         will be recorded into the BRAM within QpixDaqCtrl.vhd.
         """
-        val = AsicCMD.HardInterrogation
         addr = 0x30001
+        if hard:
+            val = AsicCMD.HardInterrogation
+        else:
+            val = AsicCMD.SoftInterrogation
         wrote = self.qpi.regWrite(addr, val)
-        time.sleep(0.025)
+        time.sleep(0.050)
         self.readEvents()
 
     def readEvtMem(self) -> int:
@@ -455,8 +501,6 @@ class QPIX_GUI(QMainWindow):
         word0 = self.qpi.regRead(REG.MEM(evt, 0))
         word1 = self.qpi.regRead(REG.MEM(evt, 1))
         word2 = self.qpi.regRead(REG.MEM(evt, 2))
-
-        # word one parts
 
         # word two parts
         wordType = (word1>>24) & 0xf
@@ -569,12 +613,10 @@ class QPIX_GUI(QMainWindow):
             self._data["asicT"][0] = asicTime
             self._data["asicX"][0] = x
             self._data["asicY"][0] = y
-            # TODO
-            # self._data["channelMask"][0] = chanMask
+            self._data["Mask"][0] = chanMask
             self._data["wordType"][0] = wordType
             self._tt.Fill()
 
-        self._tf.Write()
         return evts
 
     def getTrigTime(self) -> int:
@@ -650,6 +692,8 @@ class QPIX_GUI(QMainWindow):
         addr = REG.FIFO(ix, iy)
         self.qpi.regRead(addr)
         print("reading fifo evt")
+
+
     def loopInterrogations(self, nInts: int, lFrqs: list):
         """
         function designed to loop through a interval set to test how quickly
@@ -930,6 +974,8 @@ class QPIX_GUI(QMainWindow):
         make_root.py to store output data and the metadata tree for SAQ on the
         Zybo.
         """
+        self._tf.Write()
+
         if output_file is None:
             output_file = datetime.datetime.now().strftime('./%m_%d_%Y_%H_%M_%S.root')
             print("saving default file", output_file)
