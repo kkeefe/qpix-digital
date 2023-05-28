@@ -218,7 +218,7 @@ class QPIX_GUI(QMainWindow):
         layout.addWidget(self.cBoxAcquire, 3, 1)
         self.cBoxAcquire.clicked.connect(self.Acquire_evtMem)
         self._AcquireTimer = QTimer()
-        self._AcquireTimer.setInterval(500)
+        self._AcquireTimer.setInterval(250)
         self._AcquireTimer.timeout.connect(self.Acquire_evt)
         self.nAcquireErrors = 0
         self.nAcquires = 0
@@ -253,7 +253,7 @@ class QPIX_GUI(QMainWindow):
         keep track of any errors
         """
         self.nAcquires += 1
-        if self.nAcquires % 20 == 0:
+        if self.nAcquires % 1 == 0:
             self.trigger()
         else:
             self.trigger(hard=False)
@@ -430,13 +430,14 @@ class QPIX_GUI(QMainWindow):
 
         # iterate through possible ASICs, setting a configurable routing
         self.cBox.setChecked(False)
-        for row in range(2):
-            for col in range(2):
+        for row in range(4):
+            for col in range(4):
                 if row == 0 and col != 0:
                     adir = AsicMask.DirUp
                 else:
                     adir = AsicMask.DirRight
                 self.setAsicDirMask(row, col, adir)
+                time.sleep(0.020)
 
     def readReg(self):
         """
@@ -575,6 +576,7 @@ class QPIX_GUI(QMainWindow):
         if trigTime is None:
             print("WARNING: received Nonetype in a trigger read")
             return
+
         self._data["trgT"][0] = trigTime
         self._lastTrig = trigTime
 

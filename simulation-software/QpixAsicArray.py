@@ -181,8 +181,9 @@ def viewAsicState(qparray, time_begin=-100e-9, time_end=300e-6, ordering="Normal
 
     ax.grid(True)
     df = qparray._daqNode.fOsc
-    ax.set_yticks([i+1.15 for i in range(len(asics))], labels=[f"{asic.fOsc/df:.2f}({asic.row}, {asic.col})" for asic in asics])
+    ax.set_yticks([i+1.15 for i in range(len(asics))], labels=[f"{asic.fOsc/df:.2f} - ({asic.row}, {asic.col})" for asic in asics])
     ax.set_xlim(time_begin, time_end)
+    ax.set_xtitle("Time (s)")
     plt.tight_layout()
 
     # fake legend points
