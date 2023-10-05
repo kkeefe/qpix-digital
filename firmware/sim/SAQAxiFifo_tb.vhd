@@ -89,6 +89,7 @@ begin
     U_SAQAxiFifo : entity work.SAQAxiFifo
       port map(
         clk          => clk,
+        rst          => rst,
         fifo_dout    => fifo_dout,
         fifo_wr_en   => fifo_wr_en,
         saq_fifo_ren => saq_fifo_ren,

@@ -6,7 +6,7 @@
 -- Author     : Kevin Keefe <kevinpk@hawaii.edu>
 -- Company    :
 -- Created    : 2022-09-06
--- Last update: 2023-01-12
+-- Last update: 2023-10-02
 -- Platform   : Windows 11
 -- Standard   : VHDL08
 -------------------------------------------------------------------------------
@@ -95,14 +95,16 @@ begin  -- architecture SAQDataCtrl
    -- which fill events within FIFO
 
    -- process the edge detectors against the register mask
-    process (saqPortDataE, saqMask) is
+    process (clk, saqPortDataE, saqMask) is
         variable trg : std_logic;
     begin
+      if rising_edge(clk) then
         trg := '0';
         for i in N_SAQ_PORTS - 1 downto 0 loop
             trg := trg or (saqPortDataE(i) and saqMask(i));
         end loop;
         trigger <= trg;
+      end if;
     end process;
 
    -- if we get a trigger, then we should format the data and send
@@ -113,7 +115,7 @@ begin  -- architecture SAQDataCtrl
          saqCtrlOutValid <= '0';
          if trigger = '1' then
            saqCtrlOutValid <= '1';
-           saqCtrlOut      <= saqPortData & counter;
+           saqCtrlOut      <= saqPortDataE & counter;
          end if;
       end if;
    end process;

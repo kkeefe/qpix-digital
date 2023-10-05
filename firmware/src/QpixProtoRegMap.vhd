@@ -61,7 +61,7 @@ entity QpixProtoRegMap is
       daqTestWordOut : out  std_logic_vector(G_DATA_BITS-1 downto 0);
 
       -- SAQ Node values
-      saqMask         : out std_logic_vector(N_SAQ_PORTS - 1 downto 0);
+      saqMask         : inout std_logic_vector(N_SAQ_PORTS - 1 downto 0);
       saqEnable       : out std_logic;
       saqForce        : out std_logic;
       saqRst          : out std_logic;
@@ -130,7 +130,7 @@ begin
                 end if;
                
                when REGMAP_CMD     =>
-                  if wen = '1' and req = '1' and ack = '0' then
+                  if wen = '1' and req = '1'  then
                      trg <= wdata(0) or wdata(1);
                      swRst <= wdata(2);
                   end if;
@@ -139,7 +139,7 @@ begin
                   rdata <= status;
 
                when REGMAP_HITMASK =>
-                  if wen = '1' and req = '1' and ack = '1' then
+                  if wen = '1' and req = '1'  then
                      iX := to_integer(unsigned(wdata(31 downto 16)));
                      iY := to_integer(unsigned(wdata(15 downto 0)));
                      hitMask(iX, iY) <= '1';  
@@ -222,7 +222,7 @@ begin
                     rdata <= x"fabcdef8";
                   end if;
 
-                 if req = '1' and ack = '0' then
+                 if req = '1'  then
                     if saq_fifo_empty /= '1' then
                         saq_fifo_ren <= '1';
                     end if;
@@ -307,7 +307,7 @@ begin
             ack         <= req;
             rdata       <= x"aaaa_bbbb";
             -- pulse the asic
-            if req = '1' and ack = '0' then
+            if req = '1'  then
                asicReq     <= '1';
                asicOpWrite <= wen;
                asicData    <= wdata(15 downto 0);

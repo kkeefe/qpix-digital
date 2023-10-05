@@ -360,7 +360,7 @@ begin
    generic map (
       X_NUM_G        => X_NUM_G,
       Y_NUM_G        => Y_NUM_G,
-      Version        => x"2000_003f",
+      Version        => x"2000_004f",
       N_SAQ_PORTS    => N_SAQ_PORTS,
       TIMESTAMP_BITS => TIMESTAMP_BITS
    )
