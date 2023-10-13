@@ -27,7 +27,7 @@ QP_UDP_IP   = '192.169.1.17'
 QP_UDP_PORT = 1337
 EXIT_PACKET = bytes("ZaiJian", encoding="utf-8")
 PACKET_HEADER = bytes("HEADER", encoding="utf-8")
-DEFAULT_PACKET_SIZE = 5
+DEFAULT_PACKET_SIZE = 1
 SAQ_TMP_FILE = "./bin/saqTmp.bin"
 
 # DMA_REG NOTES
@@ -282,9 +282,9 @@ class saqUDPworker(QObject):
         # create and manage the new thread once running
         self._udpsocket = QUdpSocket(self)
         self._stopped = True
+        self.output_file = None
 
-        self.output_file = datetime.datetime.now().strftime('./bin/%m_%d_%Y_%H_%M_%S.bin')
-        self.f = open(self.output_file, 'wb')
+        self._first = 0
 
     def _udp_connect(self):
         # try to connect to the UDP socket
@@ -297,7 +297,7 @@ class saqUDPworker(QObject):
                 print("connected!")
                 connected = True
             else:
-                print("WARNING unconnected!..")
+                print("ERROR!! UDP unconnected!..")
 
         except Exception as ex:
             print(ex)
@@ -312,19 +312,23 @@ class saqUDPworker(QObject):
             if datagram == EXIT_PACKET:
                 self.f.close()
                 self.finished.emit()
+                self._udpsocket.close()
+                return
             else:
-                #print("emitting new_data signal")
                 self.new_data.emit(datagram)
                 size = len(datagram)
                 nresets = int((size-2)/8)
-                # print(f"writing packet length {size} = {nresets} resets")
                 self.f.write(PACKET_HEADER+size.to_bytes(4, byteorder="little")+datagram)
 
     def run(self):
+        if self._first == 0:
+            self._udpsocket.readyRead.connect(self.on_readyRead)
+            self._first += 1
         if not self._udp_connect():
             self.finished.emit()
         else:
-            self._udpsocket.readyRead.connect(self.on_readyRead)
+            self.output_file = datetime.datetime.now().strftime('./bin/%m_%d_%Y_%H_%M_%S.bin')
+            self.f = open(self.output_file, 'wb')
 
 
 class DMA_REG(Enum):
@@ -396,7 +400,6 @@ class qdb_interface(QObject):
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
         self.worker.finished.connect(self.udp_done)
-        self.thread.start()
 
     def regRead(self, addr=REG) -> int:
         """
@@ -482,7 +485,7 @@ class qdb_interface(QObject):
             self.regWrite(REG.SCRATCH, self.version)
 
         # set up SAQ register if version >= 8
-        if self.version >= 8:
+        if self.version >= 0x1000_0002f:
             addr = REG.SAQ(SAQReg.SAQ_FIFO_LNGTH)
             self.regWrite(addr, DEFAULT_PACKET_SIZE) # make the length of a packet 5
 
@@ -598,26 +601,30 @@ class qdb_interface(QObject):
         # initialize DMA ctrl on bootup if not running. This should be only register to ever write
         addr = DMA_REG.S2MM_CTRL
         d_ctrl = self._ReadDMA(addr)
-        print(f"Initial DMA ctrl status: {d_ctrl:08x}")
+        if d_ctrl != DMA_CTRL:
+            print(f"WARNING! Initial DMA ctrl status: {d_ctrl:08x}")
+            print(f"EXPECTED: {DMA_CTRL:08x}")
         self._WriteDMA(addr, DMA_CTRL)
 
         # check DMA destination registers, should NOT write this! Embedded software
         # and DMA control this register
         addr = DMA_REG.S2MM_DEST_ADDR
         d_dest = self._ReadDMA(addr)
-        print(f"DMA Destination Reg is: {d_dest:08x}")
+        if d_dest != DMA_DEST_MSB:
+            print(f"WARNING! DMA Destination Reg is: {d_dest:08x}")
+            print(f"EXPECTED: {DMA_DEST_MSB:08x}")
 
         # update the current length buffer
         addr = DMA_REG.S2MM_LENGTH
         dma_leng = self._ReadDMA(addr)
-        print(f"DMA Length Reg is: {dma_leng:08x}")
+        if dma_leng != DMA_LENGTH:
+            print(f"WARNING! DMA Length Reg is: {dma_leng:08x}")
+            print(f"EXPECTED: {dma_leng:08x}")
 
         # verify DMA status
         addr = DMA_REG.S2MM_STATUS
         dma_stat = self._ReadDMA(addr)
-        if dma_stat == DMA_STATUS:
-            print(f"DMA Status as expected: {dma_stat:08x}")
-        else:
+        if dma_stat != DMA_STATUS:
             print(f"WARNING DMA Status NOT as expected: {dma_stat:08x} NOT {DMA_STATUS:08x}")
             for r in DMA_STATUS_BIT:
                 if r.value & dma_stat:
@@ -643,6 +650,12 @@ class qdb_interface(QObject):
         """
         print("SAQ UDP thread worker is finished!")
         self.thread.quit()
+
+    def start(self):
+        """
+        Used to start and stop the thread
+        """
+        self.thread.start()
 
     def finish(self):
         """

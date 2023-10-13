@@ -1,5 +1,5 @@
 # interfacing dependcies
-from qdb_interface import (AsicREG, AsicCMD, AsicEnable, AsicMask, ZYBO_FRQ,
+from qdb_interface import (AsicREG, AsicCMD, AsicMask, ZYBO_FRQ,
                            qdb_interface, QDBBadAddr, REG, SAQReg, DEFAULT_PACKET_SIZE)
 import os
 import sys
@@ -39,26 +39,12 @@ class QPIX_GUI(QMainWindow):
         self.qpi = qdb_interface()
         self.close_udp.connect(self.qpi.finish) # closes udp worker thread
         self.qpi.worker.new_data.connect(self.on_new_data)
-        self._tf = ROOT.TFile("./test.root", "RECREATE")
-        self._tt = ROOT.TTree("qdbData", "data_tree")
         self._saqMask = 0xffff
 
         # SAQ meta data information
         self._start_hits = 0
         self._stop_hits = 0
         self.version = self.qpi.version
-
-        # storage tree setup words
-        self._data = {
-            "trgT" : array('L', [0]),
-            "daqT" : array('L', [0]),
-            "asicT" : array('L', [0]),
-            "asicX" : array('H', [0]),
-            "asicY" : array('H', [0]),
-            "wordType" : array('H', [0])}
-        types = ["trgT/i", "daqT/i", "asicT/i", "asicX/b", "asicY/b", "wordType/b"]
-        for data, typ in zip(self._data.items(), types):
-            self._tt.Branch(data[0], data[1], typ)
 
         # Data for on-line plots
         self._plotUpdateCadence = 1000 # milliseconds
@@ -71,9 +57,6 @@ class QPIX_GUI(QMainWindow):
         self.lcdChannels = []
         
         # passive triggering
-        #self._clock = QTimer()
-        #self._clock.timeout.connect(self.trigger)
-        #self._lastTrig = -1
         self._graphTimer = QTimer()
         self._graphTimer.timeout.connect(self._update_online_graphs)
 
@@ -90,10 +73,18 @@ class QPIX_GUI(QMainWindow):
 
         # show the main window
         self.show()
-        self.setSAQDiv()
+        self.saq_clear()
 
-        # FIXME: may go elsewhere...?
-        self.updateChannelMaskOnZybo() 
+
+    def saq_clear(self):
+        """
+        should be used at the beginning and closing of the program to put the Zybo
+        and FIFOs into disabled and empty states.
+        """
+        self.setSAQDiv()
+        self.updateChannelMaskOnZybo()
+        self.enableSAQ(False)
+        self.SaqRst()
 
     def _init_online_data(self):
         self._online_data = {}
@@ -102,7 +93,6 @@ class QPIX_GUI(QMainWindow):
         self._clear_online_data()
         
     def _clear_online_data(self):
-        print("_clear_online_data")
         self._online_data['averageResetRates_time'] = [self._plotUpdateCadence*0.001]
         for ii in range(N_SAQ_CHANNELS):
             chan = ii+1
@@ -257,13 +247,13 @@ class QPIX_GUI(QMainWindow):
         btnStop.clicked.connect(self.stopRun)
         btnLayout.addWidget(btnStop)
 
-        btnClear = QPushButton("Clear Data")
-        btnClear.clicked.connect(self.clearData)
-        btnLayout.addWidget(btnClear)
+        # btnClear = QPushButton("Clear Data")
+        # btnClear.clicked.connect(self.clearData)
+        # btnLayout.addWidget(btnClear)
 
-        btnSave = QPushButton("Save Data")
-        btnSave.clicked.connect(self.saveData)
-        btnLayout.addWidget(btnSave)
+        # btnSave = QPushButton("Save Data")
+        # btnSave.clicked.connect(self.saveData)
+        # btnLayout.addWidget(btnSave)
 
         btnLayout.addStretch() # vfill at the bottom
 
@@ -305,30 +295,16 @@ class QPIX_GUI(QMainWindow):
         return self._generalPage
 
     def startRun(self):
-        print("start run clicked")
         self.enableSAQ(True)
 
     def stopRun(self):
-        print("stop run clicked")
         self.enableSAQ(False)
 
     def clearData(self):
-        print("clear data clicked")
+        pass
         
     def saveData(self):
-        print("save data clicked")
-        
-    ############################
-    ## Zybo specific Commands ##
-    ############################
-
-    ############################
-    ## ASIC specific Commands ##
-    ############################
-
-    ############################
-    ## SAQ specific Commands  ##
-    ############################
+        pass
         
     def enableSAQ(self, enable):
         """
@@ -343,9 +319,15 @@ class QPIX_GUI(QMainWindow):
         of saqEnable which can cause continuous UDP data streams in firmware
         version 0xe.
         """
+
+        # enable the SAQ and update the mask
+        addr = REG.SAQ(SAQReg.MASK)
+        sndMask = self._saqMask if enable else 0
+        self.qpi.regWrite(addr, sndMask)
+
         addr = REG.SAQ(SAQReg.SAQ_ENABLE)
+
         if enable:
-            val = 1
             # reset all data at the beginning of a run
             self.SaqRst()
 
@@ -354,26 +336,25 @@ class QPIX_GUI(QMainWindow):
 
             # restart the thread if we haven't started it yet
             if not self.qpi.thread.isRunning():
-                print("restarting udp collection thread")
-                self.qpi.thread.start()
+                print("starting udp collection thread")
+                self.qpi.start()
+
+            # enable the Zybo
+            self.qpi.regWrite(addr, 1)
 
             # start the graph update timer
             self._graphTimer.start(self._plotUpdateCadence) # milliseconds
         else:
-            val = 0
             self._stop_hits = self.getSAQHits()
-
             self._graphTimer.stop()
 
-        self.qpi.regWrite(addr, val)
+            # disable the Zybo
+            self.qpi.regWrite(addr, 0)
+            self.SaqRst()
 
-        # enable the SAQ, update the mask, and put that value in the spin box
-        addr = REG.SAQ(SAQReg.MASK)
-        sndMask = self._saqMask if val == 1 else 0
-        self.qpi.regWrite(addr, sndMask)
-
-        if enable:
-            print("Saq Enabled")
+            if self.qpi.thread.isRunning():
+                print("stopping udp collection thread")
+                self.close_udp.emit()
 
         #self._graphTimer.timeout.connect(self._update_online_graphs)
         # reset the statistics (?)
@@ -403,7 +384,6 @@ class QPIX_GUI(QMainWindow):
         """
         addr = REG.SAQ(SAQReg.SAQ_DIV)
         val = self.qpi.regRead(addr)
-        print("read reg value:", val)
         return val
 
     def SaqRst(self):
@@ -452,22 +432,15 @@ class QPIX_GUI(QMainWindow):
             self._online_data['averageResetRates'][chan].append(0)
         
     def _graph_reset(self):
-        print("_graph_reset")
         self._clear_online_data()
         self._update_online_graphs()
         
-    # FIXME: move to other location in code
     def getChannelMaskFromGUI(self):
         self._saqMask = 0
         for ii, cb in enumerate(self.cbChannels):
-            #chan = ii+1
             if cb.isChecked():
                 self._saqMask += 1 << ii
-            #val = int(cb.isChecked())
-            #print(f"chan, val = {chan}, {val}")
-        print(f"self._saqMask = {self._saqMask}")
-        
-    # FIXME: move to other location in code
+
     def updateChannelMaskOnZybo(self):
         # read the mask value from GUI checkboxes
         self.getChannelMaskFromGUI()
@@ -475,19 +448,6 @@ class QPIX_GUI(QMainWindow):
         addr = REG.SAQ(SAQReg.MASK)
         wrote = self.qpi.regWrite(addr, self._saqMask)
         
-    def disableSAQ(self):
-        """
-        read / write the single bit register at SaqEnable to turn off Axi Fifo streaming.
-        then update the saqMask to disable triggers from saq pins
-        """
-        print("disableSAQ .....")
-        # stop update timer
-        self._graphTimer.stop()
-        
-        addr = REG.SAQ(SAQReg.SAQ_ENABLE)
-        self.qpi.regWrite(addr, 0)
-        self._stop_hits = self.getSAQHits()
-
     def getSAQHits(self):
         """
         read the SAQ Hit register buffer
@@ -496,7 +456,6 @@ class QPIX_GUI(QMainWindow):
         hits = self.qpi.regRead(addr)
         return hits
 
-        
     def SaveData(self, output_file=None):
         """
         NOTE: This function is called by default when the GUI closes
@@ -507,13 +466,18 @@ class QPIX_GUI(QMainWindow):
         make_root.py to store output data and the metadata tree for SAQ on the
         Zybo.
         """
-        if output_file is None:
-            output_file = datetime.datetime.now().strftime('./%m_%d_%Y_%H_%M_%S.root')
-            print("saving default file", output_file)
-
         input_file = self.qpi.worker.output_file
+        if input_file is None:
+            print("no output file.. no run started.. closing.")
+            return
+        print("input file is: ", input_file)
         if self.qpi.thread.isRunning():
             self.close_udp.emit()
+
+        # get the base name of the file from ./bin/basename.bin
+        # and make it a root file
+        if output_file is None:
+            output_file = input_file.split("/")[-1].split(".")[0] + ".root"
 
         found = os.path.isfile(input_file)
         if not found:
@@ -521,12 +485,9 @@ class QPIX_GUI(QMainWindow):
         else:
             args = [input_file, output_file, self.version, self._start_hits, self._stop_hits, self._saqDivReg]
             args = [str(arg) for arg in args]
-            print(f"args = {args}")
+            print(f"Creating output data file: {output_file}")
             subprocess.Popen(["python", "make_root.py", *args])
 
-    ###########################
-    ## GUI specific Commands ##
-    ###########################
     def _make_menuBar(self):
         menubar = self.menuBar()
         menubar.setNativeMenuBar(False)
@@ -578,6 +539,10 @@ class QPIX_GUI(QMainWindow):
 
 
     def closeEvent(self, event):
+        print("closing up the SAQ's DAQ..", end=" ")
+        self.saq_clear()
+        print("cleared.")
+
         print("closing the main gui")
         self.SaveData()
 
