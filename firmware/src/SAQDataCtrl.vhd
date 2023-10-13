@@ -6,7 +6,7 @@
 -- Author     : Kevin Keefe <kevinpk@hawaii.edu>
 -- Company    :
 -- Created    : 2022-09-06
--- Last update: 2023-10-02
+-- Last update: 2023-10-12
 -- Platform   : Windows 11
 -- Standard   : VHDL08
 -------------------------------------------------------------------------------
@@ -57,6 +57,7 @@ architecture Behavioral of SAQDataCtrl is
 
   -- edge detector data
   signal saqPortDataE : slv(N_SAQ_PORTS-1 downto 0) := (others => '0');
+  constant saqDataEmpty : slv(N_SAQ_PORTS-1 downto 0) := (others => '0');
   signal trigger      : sl                        := '0';
 
 begin  -- architecture SAQDataCtrl
@@ -95,25 +96,30 @@ begin  -- architecture SAQDataCtrl
    -- which fill events within FIFO
 
    -- process the edge detectors against the register mask
-    process (clk, saqPortDataE, saqMask) is
-        variable trg : std_logic;
-    begin
-      if rising_edge(clk) then
-        trg := '0';
-        for i in N_SAQ_PORTS - 1 downto 0 loop
-            trg := trg or (saqPortDataE(i) and saqMask(i));
-        end loop;
-        trigger <= trg;
-      end if;
-    end process;
+    -- process (clk, saqPortDataE, saqMask) is
+    --     variable trg : std_logic;
+    -- begin
+    --   if rising_edge(clk) then
+    --     trg := '0';
+    --     for i in N_SAQ_PORTS - 1 downto 0 loop
+    --         trg := trg or (saqPortDataE(i) and saqMask(i));
+    --     end loop;
+    --     trigger <= trg;
+    --   end if;
+    -- end process;
 
    -- if we get a trigger, then we should format the data and send
    -- it to the FIFO
    process (clk, trigger, counter)
+     variable trg : slv(N_SAQ_PORTS-1 downto 0) := (others => '0');
    begin
       if rising_edge(clk) then
          saqCtrlOutValid <= '0';
-         if trigger = '1' then
+         -- if trigger = '1' then
+         for i in N_SAQ_PORTS - 1 downto 0 loop
+             trg(i) := saqPortDataE(i) and saqMask(i);
+         end loop;
+         if trg /= saqDataEmpty then
            saqCtrlOutValid <= '1';
            saqCtrlOut      <= saqPortDataE & counter;
          end if;

@@ -34,8 +34,8 @@ port (
 
    -- I/O ports
    je    : out STD_LOGIC_VECTOR(3 downto 0);
-   DaqTx : out STD_LOGIC;
-   DaqRx : in  STD_LOGIC;
+--   DaqTx : out STD_LOGIC;
+--   DaqRx : in  STD_LOGIC;
    -- SAQ I/O
    jb : out std_logic_vector(7 downto 0); -- output clks
    jd : in std_logic_vector(7 downto 0);
@@ -110,38 +110,38 @@ architecture Behavioral of QDBDaqTop is
    signal S_AXI_0_tvalid : STD_LOGIC;
 
    -- signal inPortsArr  : QpixInPortsArrType(0 to X_NUM_G-1, 0 to Y_NUM_G-1);
-   signal hitMask     : Sl2DArray ;
+--   signal hitMask     : Sl2DArray ;
 
-   signal trg         : std_logic                                      := '0';
-   signal asicAddr    : std_logic_vector(31 downto 0)                  := (others => '0');
-   signal asicOpWrite : std_logic                                      := '0';
-   signal asicData    : std_logic_vector(15 downto 0);
-   signal asicReq     : std_logic                                      := '0';
-   --signal hitXY       : std_logic_vector (31 downto 0) := (others => '0');
-   signal timestamp   : std_logic_vector (G_TIMESTAMP_BITS-1 downto 0) := (others => '0');
-   signal chanMask    : std_logic_vector (G_N_ANALOG_CHAN-1 downto 0)  := (others => '0');
-   signal trgTime     : std_logic_vector (31 downto 0)                 := (others => '0');
-   signal evtSize     : std_logic_vector (31 downto 0)                 := (others => '0');
+--   signal trg         : std_logic                                      := '0';
+--   signal asicAddr    : std_logic_vector(31 downto 0)                  := (others => '0');
+--   signal asicOpWrite : std_logic                                      := '0';
+--   signal asicData    : std_logic_vector(15 downto 0);
+--   signal asicReq     : std_logic                                      := '0';
+--   signal hitXY       : std_logic_vector (31 downto 0) := (others => '0');
+--   signal timestamp   : std_logic_vector (G_TIMESTAMP_BITS-1 downto 0) := (others => '0');
+--   signal chanMask    : std_logic_vector (G_N_ANALOG_CHAN-1 downto 0)  := (others => '0');
+--   signal trgTime     : std_logic_vector (31 downto 0)                 := (others => '0');
+--   signal evtSize     : std_logic_vector (31 downto 0)                 := (others => '0');
 
-   signal memAddrRst  : std_logic := '0';
-   signal memRdAddr   : std_logic_vector (G_QPIX_PROTO_MEM_DEPTH-1+2 downto 0) := (others => '0');
-   signal memDataOut  : std_logic_vector (31 downto 0) := (others => '0');
-   signal memRdAck    : std_logic := '0';
-   signal memRdReq    : std_logic := '0';
-   signal memEvtSize  : std_logic_vector (G_QPIX_PROTO_MEM_DEPTH-1 downto 0) := (others => '0');
+--   signal memAddrRst  : std_logic := '0';
+--   signal memRdAddr   : std_logic_vector (G_QPIX_PROTO_MEM_DEPTH-1+2 downto 0) := (others => '0');
+--   signal memDataOut  : std_logic_vector (31 downto 0) := (others => '0');
+--   signal memRdAck    : std_logic := '0';
+--   signal memRdReq    : std_logic := '0';
+--   signal memEvtSize  : std_logic_vector (G_QPIX_PROTO_MEM_DEPTH-1 downto 0) := (others => '0');
 
-   signal qpixDebugArr   : QpixDebug2DArrayType(0 to X_NUM_G-1, 0 to Y_NUM_G-1);
-   signal extFifoMaxArr  : Slv4b2DArray;
-   signal status         : std_logic_vector(31 downto 0)  := (others => '0');
-   signal asic_mask      : std_logic_vector (15 downto 0);
-   signal daqFrameErrCnt : std_logic_vector (31 downto 0) := (others => '0');
-   signal daqBreakErrCnt : std_logic_vector (31 downto 0) := (others => '0');
+--   signal qpixDebugArr   : QpixDebug2DArrayType(0 to X_NUM_G-1, 0 to Y_NUM_G-1);
+--   signal extFifoMaxArr  : Slv4b2DArray;
+--   signal status         : std_logic_vector(31 downto 0)  := (others => '0');
+--   signal asic_mask      : std_logic_vector (15 downto 0);
+--   signal daqFrameErrCnt : std_logic_vector (31 downto 0) := (others => '0');
+--   signal daqBreakErrCnt : std_logic_vector (31 downto 0) := (others => '0');
    
    signal counter_led  : std_logic                    := '0';
    signal leds         : std_logic_vector(3 downto 0) := (others => '0');
    -- buffer daqTx / daqRx
-   signal s_daqTx      : std_logic                    := '0';
-   signal s_daqRx      : std_logic                    := '0';
+--   signal s_daqTx      : std_logic                    := '0';
+--   signal s_daqRx      : std_logic                    := '0';
    signal pulse_red    : std_logic                    := '0';
    signal pulse_blu    : std_logic                    := '0';
    signal pulse_gre    : std_logic                    := '0';
@@ -199,8 +199,8 @@ begin
     je(0) <= fclk;
     je(3 downto 1) <= sw(3 downto 1);
     -- je(1) <= sw(1); -- direct pin or switch 
-    DaqTx <= s_daqTx;
-    s_daqRx <= DaqRx;   
+--    DaqTx <= s_daqTx;
+--    s_daqRx <= DaqRx;   
     assgn: for i in 0 to 3 generate
         led(i) <= sw(i) and counter_led;
     end generate;
@@ -303,7 +303,7 @@ begin
             S_AXIS_0_tlast   => S_AXI_0_tlast,
             S_AXIS_0_tvalid  => S_AXI_0_tvalid,
             S_AXIS_0_tkeep   => "1111",
-            -- s_axis_aresetn_0 => not saqRst,
+            s_axis_aresetn_0 => not saqRst,
 
             -- clk + rst
             aresetn                   => axi_resetn,
@@ -366,7 +366,6 @@ begin
    )
    port map(
       clk          => fclk,
-      -- clk          => clk_12Mhz,
       rst          => rst,
                    
       addr         => reg_addr,
@@ -376,30 +375,30 @@ begin
       wen          => reg_wen,
       ack          => reg_ack,
 
-      asic_mask    => asic_mask,
+--      asic_mask    => asic_mask,
 
-      evtSize      => evtSize,
-      status       => status,
-      extFifoMax   => extFifoMaxArr,
+--      evtSize      => evtSize,
+--      status       => status,
+--      extFifoMax   => extFifoMaxArr,
 
-      daqFrameErrCnt => daqFrameErrCnt,
-      daqBreakErrCnt => daqBreakErrCnt,
+--      daqFrameErrCnt => daqFrameErrCnt,
+--      daqBreakErrCnt => daqBreakErrCnt,
 
-      trgTime      => trgTime,
-      timestamp    => timestamp,
-      hitMask      => hitMask,
-      chanMask     => chanMask,
+--      trgTime      => trgTime,
+--      timestamp    => timestamp,
+--      hitMask      => hitMask,
+--      chanMask     => chanMask,
                   
-      trg          => trg,
-      asicAddr     => asicAddr,
-      asicOpWrite  => asicOpWrite,
-      asicData     => asicData,
-      asicReq      => asicReq,
+--      trg          => trg,
+--      asicAddr     => asicAddr,
+--      asicOpWrite  => asicOpWrite,
+--      asicData     => asicData,
+--      asicReq      => asicReq,
 
-      memRdReq     => memRdReq,
-      memRdAck     => memRdAck,
-      memData      => memDataOut,
-      memAddr      => memRdAddr,
+--      memRdReq     => memRdReq,
+--      memRdAck     => memRdAck,
+--      memData      => memDataOut,
+--      memAddr      => memRdAddr,
 
       -- SAQ Node interactions
       saqMask         => saqMask,
@@ -415,43 +414,43 @@ begin
       saq_fifo_data   => saq_fifo_data
    );
 
-   ---------------------------------------------------
-   -- DAQ node
-   ---------------------------------------------------
-   QpixDaqCtrl_U : entity work.QpixDaqCtrl
-   generic map(
-      TXRX_TYPE  => TXRX_TYPE,
-      MEM_DEPTH  => G_QPIX_PROTO_MEM_DEPTH
-   )
-   port map(
-      clk         => fclk,
-      rst         => rst,
+--   ---------------------------------------------------
+--   -- DAQ node
+--   ---------------------------------------------------
+--   QpixDaqCtrl_U : entity work.QpixDaqCtrl
+--   generic map(
+--      TXRX_TYPE  => TXRX_TYPE,
+--      MEM_DEPTH  => G_QPIX_PROTO_MEM_DEPTH
+--   )
+--   port map(
+--      clk         => fclk,
+--      rst         => rst,
                   
-      daqTx       => s_daqTx,
-      daqRx       => s_daqRx,
+--      daqTx       => s_daqTx,
+--      daqRx       => s_daqRx,
 
-      trg         => trg,
-      asicReq     => asicReq,
-      asicOpWrite => asicOpWrite,
-      asicData    => asicData,
-      asicAddr    => asicAddr,
+--      trg         => trg,
+--      asicReq     => asicReq,
+--      asicOpWrite => asicOpWrite,
+--      asicData    => asicData,
+--      asicAddr    => asicAddr,
 
-      trgTime     => trgTime,
-      evt_fin     => status(0),
+--      trgTime     => trgTime,
+--      evt_fin     => status(0),
 
-      uartFrameCnt => daqFrameErrCnt,
-      uartBreakCnt => daqBreakErrCnt,
+--      uartFrameCnt => daqFrameErrCnt,
+--      uartBreakCnt => daqBreakErrCnt,
 
-      -- event memory ports
-      memAddrRst  => memAddrRst,
-      memRdAddr   => memRdAddr,
-      memDataOut  => memDataOut, 
-      memRdReq    => memRdReq,
-      memRdAck    => memRdAck,
-      memEvtSize  => evtSize,
-      memFullErr  => open);
+--      -- event memory ports
+--      memAddrRst  => memAddrRst,
+--      memRdAddr   => memRdAddr,
+--      memDataOut  => memDataOut, 
+--      memRdReq    => memRdReq,
+--      memRdAck    => memRdAck,
+--      memEvtSize  => evtSize,
+--      memFullErr  => open);
       
-   memAddrRst <= trg or asicReq;
+--   memAddrRst <= trg or asicReq;
 
    ---------------------------------------------------
    -- SAQ node
@@ -508,7 +507,7 @@ begin
     
  
  -- pulse relevant LEDs
- pulse : process (fclk, s_daqRx, s_daqTx) is
+ pulse : process (fclk) is
      -- variable conditions
      variable cr5 : boolean := false;
      variable cb5 : boolean := false;
@@ -534,13 +533,9 @@ begin
      if rising_edge(fclk) then
      
        -- LED Flashing conditions
---        cr5 := saqForce = '1';
---        cg5 := saqEnable = '1';
---        cb5 := saqRst = '1';
-
-        cr5 := evtSize /= x"0000_0000";
-        cg5 := s_daqRx = '1';
-        cb5 := s_daqTx = '1';
+        cr5 := saqForce = '1';
+        cg5 := saqRst = '1';
+        cb5 := saq_fifo_empty = '1';
               
         cr6 := saq_fifo_full = '1';
         cg6 := saqEnable = '1';
