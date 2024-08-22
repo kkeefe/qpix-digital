@@ -15,6 +15,10 @@ prototype-project/dma_intr
 prototype-project/fifo_generator_0_ex
 prototype-project/axis_data_fifo_0_ex
 prototype-project/*
+prototype-software/*
+SAQ_testbench/*
+simulation-rtd/*
+simulation-software/*
 radiogenic/radiogenic
 .vscode
 .vs
